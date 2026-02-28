@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Metadata required by the VoiceInteractionService framework contract.
+    The framework reads this via the android.voice_interaction service meta-data tag.
+    settingsActivity: the activity shown in Settings > Default apps > Digital assistant.
+    supportsAssist: declares we handle assist gestures.
+    supportsLaunchVoiceAssistFromKeyguard: allow wake-word trigger from lockscreen.
+-->
+<voice-interaction-service
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="us.foxtek.pulseserver.assistant.AssistantVoiceInteractionSessionService"
+    android:settingsActivity="us.foxtek.pulseserver.ui.MainActivity"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true"
+    android:supportsLocalInteraction="true" />

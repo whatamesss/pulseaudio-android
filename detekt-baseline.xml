@@ -1,0 +1,41 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:PulseClientHandler.kt$PulseClientHandler$isActive &amp;&amp; socket.isConnected &amp;&amp; !socket.isClosed &amp;&amp; !sendError</ID>
+    <ID>CyclomaticComplexMethod:PulseClientHandler.kt$PulseClientHandler$private fun handleCommandFrame(frame: PulseFrame)</ID>
+    <ID>CyclomaticComplexMethod:PulseClientHandler.kt$PulseClientHandler$private fun handleCreatePlayback(r: TagStructReader, tag: Long)</ID>
+    <ID>CyclomaticComplexMethod:PulseClientHandler.kt$PulseClientHandler$private fun handleCreateRecord(r: TagStructReader, tag: Long)</ID>
+    <ID>CyclomaticComplexMethod:TagStructReader.kt$TagStructReader$fun skipField()</ID>
+    <ID>LargeClass:PulseClientHandler.kt$PulseClientHandler</ID>
+    <ID>LongMethod:PulseClientHandler.kt$PulseClientHandler$private fun handleCommandFrame(frame: PulseFrame)</ID>
+    <ID>LongMethod:PulseClientHandler.kt$PulseClientHandler$private fun handleCreatePlayback(r: TagStructReader, tag: Long)</ID>
+    <ID>LongMethod:PulseClientHandler.kt$PulseClientHandler$private fun handleCreateRecord(r: TagStructReader, tag: Long)</ID>
+    <ID>MatchingDeclarationName:ServerState.kt$ServerAudioState</ID>
+    <ID>MaxLineLength:PulseClientHandler.kt$PulseClientHandler$Log.i(TAG, "CREATE_RECORD: format=$format ch=$channels rate=$rate chanMap=${channelMap.toList()} fragsize=$fragsize")</ID>
+    <ID>MaxLineLength:PulseClientHandler.kt$PulseClientHandler$val actualMax = if (maxlength &gt; 0 &amp;&amp; maxlength != PAConst.INVALID_INDEX) maxlength else PAConst.MAX_BYTES.toLong()</ID>
+    <ID>MaxLineLength:PulseClientHandler.kt$PulseClientHandler$val actualMin = if (minreq &gt; 0 &amp;&amp; minreq != PAConst.INVALID_INDEX) minreq else PAConst.MINREQ_BYTES.toLong()</ID>
+    <ID>MaxLineLength:PulseClientHandler.kt$PulseClientHandler$val actualPre = if (prebuf &gt; 0 &amp;&amp; prebuf != PAConst.INVALID_INDEX) prebuf else PAConst.PREBUF_BYTES.toLong()</ID>
+    <ID>MaxLineLength:PulseClientHandler.kt$PulseClientHandler$val actualTl = if (tlength &gt; 0 &amp;&amp; tlength != PAConst.INVALID_INDEX) tlength else PAConst.TL_BYTES.toLong()</ID>
+    <ID>SwallowedException:PulseClientHandler.kt$PulseClientHandler$e: EOFException</ID>
+    <ID>TooGenericExceptionCaught:AudioPlayer.kt$AudioPlayer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:AudioRecorder.kt$AudioRecorder$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PulseAudioService.kt$PulseAudioService$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PulseClientHandler.kt$PulseClientHandler$e: Exception</ID>
+    <ID>TooManyFunctions:PulseAudioService.kt$PulseAudioService : LifecycleService</ID>
+    <ID>TooManyFunctions:PulseClientHandler.kt$PulseClientHandler</ID>
+    <ID>TooManyFunctions:TagStructReader.kt$TagStructReader</ID>
+    <ID>TooManyFunctions:TagStructWriter.kt$TagStructWriter</ID>
+    <ID>UnusedPrivateProperty:AudioPlayer.kt$AudioPlayer$private val bytesPerFrame: Int get() = when (paFormat) { PASampleFormat.FLOAT32LE, PASampleFormat.FLOAT32BE -&gt; 4 * channels PASampleFormat.S32LE, PASampleFormat.S32BE -&gt; 4 * channels else -&gt; 2 * channels }</ID>
+    <ID>UnusedPrivateProperty:PulseClientHandler.kt$PulseClientHandler$val _cookie = r.readArbitrary() // accept any cookie (open access)</ID>
+    <ID>UnusedPrivateProperty:PulseClientHandler.kt$PulseClientHandler$val sinkIndex = r.readU32() // PA_INVALID_INDEX or 0</ID>
+    <ID>UnusedPrivateProperty:PulseClientHandler.kt$PulseClientHandler$val sinkName = r.readString()</ID>
+    <ID>UnusedPrivateProperty:PulseClientHandler.kt$PulseClientHandler$val sourceIndex = r.readU32()</ID>
+    <ID>UnusedPrivateProperty:PulseClientHandler.kt$PulseClientHandler$val sourceName = r.readString()</ID>
+    <ID>UnusedPrivateProperty:PulseClientHandler.kt$PulseClientHandler$val streamIdx = r.readU32()</ID>
+    <ID>UnusedPrivateProperty:PulseClientHandler.kt$PulseClientHandler$val syncid = r.readU32() // sync group ID (v1+)</ID>
+    <ID>UnusedPrivateProperty:PulseClientHandler.kt$PulseClientHandler$val volume = r.readCVolume()</ID>
+    <ID>UnusedPrivateProperty:TagStructReader.kt$TagStructReader$val valueLen = readRawU32().toInt()</ID>
+    <ID>VariableNaming:PulseClientHandler.kt$PulseClientHandler$val _cookie = r.readArbitrary() // accept any cookie (open access)</ID>
+  </CurrentIssues>
+</SmellBaseline>
