@@ -240,7 +240,8 @@ class PulseClientHandler(
         val actualFormat = format
         playbackCorked   = corked
         audioPlayer = AudioPlayer(actualRate, channels, actualFormat)
-        if (!corked) audioPlayer?.start()
+        audioPlayer?.startBuffered(scope)
+        if (corked) audioPlayer?.pause()
 
         // Echo back client's buffer attrs if valid, otherwise use our defaults
         val actualTl    = if (tlength   > 0 && tlength   != PAConst.INVALID_INDEX) tlength   else PAConst.TL_BYTES.toLong()
@@ -429,7 +430,11 @@ class PulseClientHandler(
         r.readU32()  // channel index
         val cork = r.readBoolean()
         playbackCorked = cork
-        if (cork) audioPlayer?.pause() else audioPlayer?.start()
+        if (cork) {
+            audioPlayer?.pause()
+        } else {
+            audioPlayer?.resume()
+        }
         Log.i(TAG, "Playback ${if (cork) "corked" else "uncorked"}")
         sendReply(tag)
     }
@@ -653,7 +658,7 @@ class PulseClientHandler(
     private fun handleAudioFrame(frame: PulseFrame) {
         val playbackChan = playbackChannelId
         if (playbackChan != null && frame.channel == playbackChan.toLong()) {
-            audioPlayer?.write(frame.payload)
+            audioPlayer?.enqueue(frame.payload)
             playbackCredit -= frame.payload.size
             // Replenish credit when it drops below minreq so the client
             // keeps sending without waiting for the next REQUEST
