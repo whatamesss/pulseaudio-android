@@ -17,6 +17,10 @@ val keystoreProperties = Properties().apply {
     }
 }
 
+// Bump both values together, then tag the release (see README → Releases).
+val appVersionCode = 2
+val appVersionName = "1.0.0"
+
 android {
     namespace = "us.foxtek.pulseserver"
     compileSdk = 34
@@ -25,8 +29,8 @@ android {
         applicationId = "us.foxtek.pulseserver"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
     }
 
     signingConfigs {
@@ -48,6 +52,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+    }
+
+    // Include the app version in the release APK filename.
+    applicationVariants.all {
+        outputs.all {
+            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl)
+                .outputFileName = "pulseserver-$appVersionName-release.apk"
         }
     }
 
