@@ -149,8 +149,7 @@ Run all quality checks (lint, detekt, coverage):
 
 ## Branches
 
-- `main` — this fork's development history.
-- `original` — the untouched upstream source at the point this fork started.
+All development happens on `main`.
 
 ## Releases
 
