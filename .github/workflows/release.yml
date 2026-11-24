@@ -12,9 +12,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -23,9 +23,29 @@ jobs:
 
       - name: Check tag matches app version
         run: |
+          set -euo pipefail
           version_name=$(sed -n 's/^val appVersionName = "\(.*\)"/\1/p' app/build.gradle.kts)
           if [ "v${version_name}" != "${GITHUB_REF_NAME}" ]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match versionName ${version_name}" >&2
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match versionName ${version_name}"
+            exit 1
+          fi
+
+      - name: Check release secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              missing="${missing} ${name}"
+            fi
+          done
+          if [ -n "${missing}" ]; then
+            echo "::error::Missing repository secrets:${missing}"
             exit 1
           fi
 
@@ -36,12 +56,10 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -z "${KEYSTORE_BASE64}" ]; then
-            echo "KEYSTORE_BASE64 secret is not configured" >&2
-            exit 1
-          fi
+          set -euo pipefail
           mkdir -p keystore
-          printf '%s' "${KEYSTORE_BASE64}" | base64 --decode > keystore/release.jks
+          printf '%s' "${KEYSTORE_BASE64}" | tr -d '\r\n' | base64 --decode > keystore/release.jks
+          test -s keystore/release.jks
           cat > keystore.properties <<EOF
           storeFile=keystore/release.jks
           storePassword=${KEYSTORE_PASSWORD}
@@ -55,5 +73,5 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md
           files: app/build/outputs/apk/release/pulseserver-*-release.apk
-          generate_release_notes: true

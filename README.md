@@ -7,6 +7,9 @@
 >
 > What this fork changes:
 >
+> - **Buffered audio playback (main improvement)** — a bounded ~300 ms PCM
+>   queue decouples socket reads from `AudioTrack` writes, so slow audio writes
+>   no longer stall the network receive path.
 > - **Playback only** — microphone capture and the `RECORD_AUDIO` permission
 >   are gone; record/source protocol commands are rejected.
 > - **One client at a time** — extra PulseAudio connections are refused so two
@@ -28,9 +31,24 @@ An Android app that runs a PulseAudio native protocol server on your phone or ta
 PulseServer implements the PulseAudio native binary wire protocol (tagstruct framing, protocol version 16) entirely in Kotlin. It opens a TCP socket and accepts connections from a Linux PulseAudio daemon using the standard `module-tunnel-sink` module.
 
 - **Playback** — received PCM audio is written to `AudioTrack` (Android speaker)
+- **Buffered receive path** — incoming PCM goes through a bounded queue instead of being written to `AudioTrack` from the socket read loop
 - **Volume/mute** — PA volume and mute commands update the Android stream in real time
 - **Single client** — only one PulseAudio connection is accepted at a time; extra connections are refused so two devices cannot fight over playback
 - **Playback only** — record/source commands are rejected; no microphone permission is needed
+
+### Audio buffering
+
+The main fork improvement is the playback path. Incoming PCM used to be written
+to `AudioTrack` directly from the socket read loop, so a slow or blocking write
+could stall network reads and cause the PulseAudio client to back up.
+
+Now the socket loop only enqueues PCM into a bounded queue (about 300 ms at the
+stream's sample rate). A dedicated writer coroutine drains it into
+`AudioTrack`, so network reception stays responsive even when the speaker path
+is busy or paused. If the queue fills, the oldest audio is dropped rather than
+delaying playback. Pause/cork, flush, and drain are handled explicitly, and
+shutdown waits for the writer without releasing `AudioTrack` underneath a
+native write.
 
 ## Setup
 
@@ -142,12 +160,13 @@ and publishes a GitHub Release with the signed APK attached.
 To cut a release:
 
 1. Bump `versionCode` and `versionName` in `app/build.gradle.kts`.
-2. Commit the change.
-3. Tag and push:
+2. Update `RELEASE_NOTES.md` for the new version.
+3. Commit the changes.
+4. Tag and push:
 
    ```bash
-   git tag -a v1.0.0 -m "PulseServer 1.0.0"
-   git push origin main v1.0.0
+   git tag -a v1.0.1 -m "PulseServer 1.0.1"
+   git push origin main v1.0.1
    ```
 
 The workflow needs these repository secrets:
