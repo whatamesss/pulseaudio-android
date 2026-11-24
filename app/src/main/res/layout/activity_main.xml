@@ -17,7 +17,7 @@
         android:id="@+id/tvTitle"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="PulseAudio Server"
+        android:text="PulseAudio-MPD"
         android:textSize="24sp"
         android:textStyle="bold"
         android:textColor="@color/text_primary"
@@ -29,7 +29,7 @@
         android:id="@+id/tvSubtitle"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:text="Mic + Speaker via PulseAudio native protocol"
+        android:text="pulseaudio server on android"
         android:textSize="13sp"
         android:textColor="@color/text_secondary"
         android:layout_marginTop="4dp"
@@ -88,32 +88,16 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
 
-            <LinearLayout
+            <TextView
+                android:id="@+id/tvAddress"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
                 android:layout_marginTop="4dp"
-                android:gravity="center_vertical">
-
-                <TextView
-                    android:id="@+id/tvAddress"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="—"
-                    android:textSize="20sp"
-                    android:textColor="@color/accent"
-                    android:fontFamily="monospace" />
-
-                <Button
-                    android:id="@+id/btnCopyIp"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Copy"
-                    android:enabled="false"
-                    style="@style/Widget.Material3.Button.TextButton" />
-
-            </LinearLayout>
+                android:text="—"
+                android:textSize="15sp"
+                android:maxLines="1"
+                android:textColor="@color/accent"
+                android:fontFamily="monospace" />
 
         </LinearLayout>
     </androidx.cardview.widget.CardView>
@@ -240,27 +224,12 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:text="If MPD is configured above, Start/Stop sends enableoutput/disableoutput for that output. The name must match MPD's config:\n\naudio_output {\n    type       &quot;pulse&quot;\n    name       &quot;Android&quot;\n    server     &quot;android.home.arpa:4713&quot;\n    always_on  &quot;no&quot;\n    mixer_type &quot;none&quot;\n}"
+        android:text="If MPD is configured above, Start/Stop sends enableoutput/disableoutput for that output. The name must match MPD's config:\n\naudio_output {\n    type       &quot;pulse&quot;\n    name       &quot;Android&quot;\n    server     &quot;android.home.arpa:4713&quot;\n    always_on  &quot;no&quot;\n    mixer_type &quot;none&quot;\n}\n\nWithout MPD, you can still send audio here with module-tunnel-sink or paplay."
         android:textSize="11sp"
         android:textColor="@color/text_secondary"
         android:fontFamily="monospace"
         android:lineSpacingExtra="2dp"
         app:layout_constraintTop_toBottomOf="@id/btnToggle"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <!-- Hint / instructions -->
-    <TextView
-        android:id="@+id/tvHint"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="24dp"
-        android:text=""
-        android:textSize="12sp"
-        android:textColor="@color/text_secondary"
-        android:fontFamily="monospace"
-        android:lineSpacingExtra="4dp"
-        app:layout_constraintTop_toBottomOf="@id/tvMpdHelp"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 

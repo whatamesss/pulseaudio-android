@@ -66,7 +66,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnToggle.setOnClickListener { toggleServer() }
-        binding.btnCopyIp.setOnClickListener { copyConnectionInfo() }
 
         // Keep the server alive with the screen off; ask once on first launch.
         if (!isIgnoringBatteryOptimizations(this)) {
@@ -162,47 +161,30 @@ class MainActivity : AppCompatActivity() {
                     binding.btnToggle.text = "Start Server"
                     binding.tvStatus.text = "Server stopped"
                     binding.tvAddress.text = "—"
-                    binding.tvHint.text = ""
-                    binding.btnCopyIp.isEnabled = false
                 }
                 is ServerState.Starting -> {
                     binding.btnToggle.text = "Stop Server"
                     binding.tvStatus.text = "Starting…"
                     binding.tvAddress.text = "…"
-                    binding.btnCopyIp.isEnabled = false
                 }
                 is ServerState.Running -> {
                     binding.btnToggle.text = "Stop Server"
                     binding.tvStatus.text = "Listening — waiting for client"
                     binding.tvAddress.text = "${state.ip}:${state.port}"
-                    binding.tvHint.text = buildConnectionHint(state.ip, state.port)
-                    binding.btnCopyIp.isEnabled = true
                 }
                 is ServerState.ClientConnected -> {
                     binding.btnToggle.text = "Stop Server"
                     binding.tvStatus.text = "Client connected: ${state.ip}"
-                    binding.btnCopyIp.isEnabled = true
                 }
                 is ServerState.Error -> {
                     binding.btnToggle.text = "Start Server"
                     binding.tvStatus.text = "Error: ${state.message}"
                     binding.tvAddress.text = "—"
-                    binding.btnCopyIp.isEnabled = false
                 }
             }
         }
     }
 
-    private fun copyConnectionInfo() {
-        val s = service ?: return
-        val text = when (val st = s.state) {
-            is ServerState.Running -> "${st.ip}:${st.port}"
-            is ServerState.ClientConnected -> "${st.ip}:${PortPreferences.load(this)}"
-            else -> return
-        }
-        copyToClipboard(this, "PA address", text)
-        binding.tvHint.text = "Copied: $text\n\n${binding.tvHint.text}"
-    }
 
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<String>, grantResults: IntArray
@@ -213,7 +195,7 @@ class MainActivity : AppCompatActivity() {
         ) {
             toggleServer()
         } else {
-            binding.tvStatus.text = "Microphone permission required"
+            binding.tvStatus.text = "Notification permission required"
         }
     }
 }

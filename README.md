@@ -1,22 +1,22 @@
 # PulseServer for Android
 
-An Android app that runs a PulseAudio native protocol server on your phone or tablet. Linux machines can connect over the local network and use the Android device as a remote speaker and microphone — no root, no native libraries, no PulseAudio installed on Android.
+An Android app that runs a PulseAudio native protocol server on your phone or tablet. Linux machines can connect over the local network and use the Android device as a remote speaker — no root, no native libraries, no PulseAudio installed on Android.
 
 ## How it works
 
-PulseServer implements the PulseAudio native binary wire protocol (tagstruct framing, protocol version 16) entirely in Kotlin. It opens a TCP socket and accepts connections from a Linux PulseAudio daemon using the standard `module-tunnel-sink` and `module-tunnel-source` modules.
+PulseServer implements the PulseAudio native binary wire protocol (tagstruct framing, protocol version 16) entirely in Kotlin. It opens a TCP socket and accepts connections from a Linux PulseAudio daemon using the standard `module-tunnel-sink` module.
 
 - **Playback** — received PCM audio is written to `AudioTrack` (Android speaker)
-- **Capture** — microphone audio from `AudioRecord` is streamed back to the client
 - **Volume/mute** — PA volume and mute commands update the Android stream in real time
-- **Multiple clients** — each TCP connection runs in its own coroutine; only one client can hold the microphone at a time
+- **Multiple clients** — each TCP connection runs in its own coroutine, so a new connection never interrupts an existing playback stream
+- **Playback only** — record/source commands are rejected; no microphone permission is needed
 
 ## Setup
 
 ### Android
 
 1. Install the app
-2. Grant the **Microphone** permission when prompted
+2. Grant the **Notification** permission when prompted (Android 13+)
 3. Set the port if needed (default: `4713`)
 4. Tap **Start Server**
 5. Note the IP address shown on screen
@@ -26,8 +26,7 @@ PulseServer implements the PulseAudio native binary wire protocol (tagstruct fra
 Add to `/etc/pulse/default.pa`, replacing `<ip>` and `<port>` with the values shown in the app:
 
 ```
-load-module module-tunnel-sink   server=tcp:<ip>:<port>
-load-module module-tunnel-source server=tcp:<ip>:<port>
+load-module module-tunnel-sink server=tcp:<ip>:<port>
 ```
 
 Then restart PulseAudio:
@@ -70,13 +69,36 @@ audio_output {
 ## Building
 
 ```bash
-./gradlew assembleDebug
+./gradlew assembleRelease
+```
+
+The APK lands at `app/build/outputs/apk/release/app-release.apk`.
+
+Release signing uses a local keystore that is **not** committed. Create
+`keystore.properties` in the repo root (it is gitignored):
+
+```properties
+storeFile=keystore/release.jks
+storePassword=…
+keyAlias=pulseserver
+keyPassword=…
+```
+
+and put the keystore at `keystore/release.jks`. Keep both safe — losing them
+means you can't update an installed copy without uninstalling it first. If
+`keystore.properties` is missing, `assembleRelease` still works but produces an
+unsigned APK.
+
+Install it on a connected device:
+
+```bash
+./gradlew installRelease
 ```
 
 Run tests:
 
 ```bash
-./gradlew testDebugUnitTest
+./gradlew testReleaseUnitTest
 ```
 
 Run all quality checks (lint, detekt, coverage):
@@ -95,17 +117,16 @@ app/src/main/java/us/foxtek/pulseserver/
 │   ├── TagStructReader.kt     # PA tagstruct deserialisation
 │   ├── TagStructWriter.kt     # PA tagstruct serialisation
 │   ├── PulseClientHandler.kt  # Per-connection protocol state machine
-│   └── ServerState.kt         # Shared volume/mute state (atomic)
+│   ├── ServerState.kt         # Shared volume/mute state (atomic)
 ├── audio/
 │   ├── AudioPlayer.kt         # AudioTrack wrapper (PCM playback)
-│   ├── AudioRecorder.kt       # AudioRecord wrapper (mic capture)
 │   └── PcmAudioQueue.kt       # Bounded buffer between network and AudioTrack
 ├── service/
 │   └── PulseAudioService.kt   # Foreground service, ServerSocket lifecycle
 ├── ui/
 │   ├── MainActivity.kt        # Single-screen UI
 │   ├── PortPreferences.kt     # SharedPreferences helper for port setting
-│   └── UiHelpers.kt           # Permissions, clipboard, connection hint
+│   └── UiHelpers.kt           # Permissions and battery-exemption helpers
 └── assistant/
     └── AssistantVoiceInteractionService.kt  # VoiceInteractionService skeleton
 ```

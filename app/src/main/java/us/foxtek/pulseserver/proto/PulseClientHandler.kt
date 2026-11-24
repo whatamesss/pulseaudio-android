@@ -2,10 +2,7 @@ package us.foxtek.pulseserver.proto
 
 import android.util.Log
 import us.foxtek.pulseserver.audio.AudioPlayer
-import us.foxtek.pulseserver.audio.AudioRecorder
 import kotlinx.coroutines.*
-import kotlinx.coroutines.sync.Mutex
-import java.util.concurrent.atomic.AtomicBoolean
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.EOFException
@@ -20,15 +17,16 @@ private const val TAG = "PulseClientHandler"
  *   - AUTH handshake
  *   - SET_CLIENT_NAME
  *   - CREATE_PLAYBACK_STREAM  → routes audio to AudioTrack (speaker)
- *   - CREATE_RECORD_STREAM    → routes mic audio back to client
- *   - Info queries (server/sink/source)
+ *   - Info queries (server/sink)
  *   - Graceful cleanup
+ *
+ * This is a playback-only server: record/source commands are rejected, so no
+ * microphone permission or capture code is needed.
  */
 class PulseClientHandler(
     private val socket: Socket,
     private val onStatus: (String) -> Unit,
-    private val scope: CoroutineScope,
-    private val micLock: kotlinx.coroutines.sync.Mutex
+    private val scope: CoroutineScope
 ) {
     private val input  = BufferedInputStream(socket.getInputStream())
     private val output = BufferedOutputStream(socket.getOutputStream())
@@ -39,10 +37,8 @@ class PulseClientHandler(
 
     // Stream state
     private var playbackChannelId: Int? = null   // channel for incoming PCM from PA client
-    private var recordChannelId: Int?   = null   // channel for outgoing mic PCM to PA client
 
     private var audioPlayer: AudioPlayer? = null
-    private var audioRecorder: AudioRecorder? = null
 
     // Credit tracking for playback: how many bytes the client is allowed to write
     private var playbackCredit  = 0L
@@ -52,8 +48,6 @@ class PulseClientHandler(
 
     // Volume state is shared across all connections via ServerAudioState
     private var playbackRequestJob: Job? = null
-    private var recordJob: Job? = null
-    private val holdingMicLock = AtomicBoolean(false)
 
     fun run() {
         try {
@@ -93,16 +87,16 @@ class PulseClientHandler(
             PACommand.AUTH                  -> handleAuth(r, tag)
             PACommand.SET_CLIENT_NAME       -> handleSetClientName(r, tag)
             PACommand.CREATE_PLAYBACK_STREAM-> handleCreatePlayback(r, tag)
-            PACommand.CREATE_RECORD_STREAM  -> handleCreateRecord(r, tag)
+            PACommand.CREATE_RECORD_STREAM  -> rejectRecordStream(tag)
             PACommand.DELETE_PLAYBACK_STREAM-> handleDeletePlayback(r, tag)
-            PACommand.DELETE_RECORD_STREAM  -> handleDeleteRecord(r, tag)
+            PACommand.DELETE_RECORD_STREAM  -> sendReply(tag)
             PACommand.GET_SERVER_INFO       -> handleGetServerInfo(tag)
             PACommand.GET_SINK_INFO,
             PACommand.GET_SINK_INFO_LIST    -> handleGetSinkInfo(r, tag)
-            PACommand.GET_SOURCE_INFO,
-            PACommand.GET_SOURCE_INFO_LIST  -> handleGetSourceInfo(r, tag)
+            PACommand.GET_SOURCE_INFO       -> sendError(tag, PAError.NO_ENTITY)
+            PACommand.GET_SOURCE_INFO_LIST  -> sendReply(tag)  // no sources
             PACommand.LOOKUP_SINK           -> handleLookupSink(r, tag)
-            PACommand.LOOKUP_SOURCE         -> handleLookupSource(r, tag)
+            PACommand.LOOKUP_SOURCE         -> sendError(tag, PAError.NO_ENTITY)
             PACommand.GET_SINK_INPUT_INFO,
             PACommand.GET_SINK_INPUT_INFO_LIST,
             PACommand.GET_SOURCE_OUTPUT_INFO,
@@ -125,9 +119,9 @@ class PulseClientHandler(
             PACommand.MOVE_SOURCE_OUTPUT    -> sendReply(tag)  // empty/ack reply
             PACommand.SET_SINK_VOLUME       -> handleSetSinkVolume(r, tag, hasName = true)
             PACommand.SET_SINK_INPUT_VOLUME -> handleSetSinkVolume(r, tag, hasName = false)
-            PACommand.SET_SOURCE_VOLUME     -> handleSetSourceVolume(r, tag)
+            PACommand.SET_SOURCE_VOLUME,
+            PACommand.SET_SOURCE_MUTE       -> sendReply(tag)  // playback-only: no source
             PACommand.SET_SINK_MUTE         -> handleSetSinkMute(r, tag)
-            PACommand.SET_SOURCE_MUTE       -> handleSetSourceMute(r, tag)
             PACommand.SET_SINK_INPUT_MUTE,
             PACommand.SET_DEFAULT_SINK,
             PACommand.SET_DEFAULT_SOURCE,
@@ -300,101 +294,9 @@ class PulseClientHandler(
         onStatus("Playback stream created (speaker active)")
     }
 
-    private fun handleCreateRecord(r: TagStructReader, tag: Long) {
-        if (clientVersion < 13) r.readString()
-
-        val (format, channels, rate) = r.readSampleSpec()
-        val channelMap = r.readChannelMap()
-        val sourceIndex = r.readU32()
-        val sourceName  = r.readString()
-        val maxlength   = r.readU32()
-        val corked      = r.readBoolean()
-        val fragsize    = r.readU32()
-
-        // v12: no_remap, no_remix, fix_format, fix_rate, fix_channels, no_move, variable_rate
-        if (clientVersion >= 12 && r.remaining() >= 7) {
-            r.readBoolean(); r.readBoolean(); r.readBoolean()
-            r.readBoolean(); r.readBoolean(); r.readBoolean(); r.readBoolean()
-        }
-        // v13: peak_detect, adjust_latency, proplist, direct_on_input (U32)
-        var peakDetect = false
-        if (clientVersion >= 13 && r.remaining() > 0) {
-            peakDetect = r.readBoolean(); r.readBoolean(); r.readProplist(); r.readU32()
-        }
-        // v14: early_requests
-        if (clientVersion >= 14 && r.remaining() > 0) { r.readBoolean() }
-        // v15: dont_inhibit_auto_suspend, fail_on_suspend
-        if (clientVersion >= 15 && r.remaining() >= 2) { r.readBoolean(); r.readBoolean() }
-        // v22: n_formats + format_info list, cvolume, muted, volume_set, muted_set,
-        //       relative_volume, passthrough
-        if (clientVersion >= 22 && r.remaining() > 0) {
-            val nFormats = r.readU8()
-            repeat(nFormats) { r.readFormatInfo() }
-            r.readCVolume(); r.readBoolean(); r.readBoolean()
-            r.readBoolean(); r.readBoolean(); r.readBoolean()
-        }
-
-        Log.i(TAG, "CREATE_RECORD: format=$format ch=$channels rate=$rate chanMap=${channelMap.toList()} fragsize=$fragsize")
-
-        if (channels !in 1..2) {
-            Log.w(TAG, "Unsupported record channel count: $channels")
-            sendError(tag, PAError.NOT_SUPPORTED)
-            return
-        }
-
-        // A client may create a second stream without deleting the first.
-        if (audioRecorder != null) stopRecordStream()
-
-        val chanId = 1  // record channel
-        recordChannelId = chanId
-
-        // AudioRecorder always captures S16LE. Reply with what we really send
-        // instead of echoing the client's requested format.
-        val recordChannels = channels
-        val recordMap = if (recordChannels == 1) byteArrayOf(3) else byteArrayOf(1, 2)
-
-        val actualRate = if (rate > 0 && rate <= 192000) rate.toInt() else PAConst.SAMPLE_RATE
-        // Use the client's requested fragsize if valid, otherwise our default
-        val actualFrag = if (fragsize > 0 && fragsize != PAConst.INVALID_INDEX) fragsize
-                         else PAConst.FRAG_BYTES.toLong()
-        val actualMax  = actualFrag * 8
-
-        val w = TagStructWriter()
-        w.writeU32(PACommand.REPLY.toLong())
-        w.writeU32(tag)
-        w.writeU32(chanId.toLong())        // channel
-        w.writeU32(0L)                     // source_output index
-
-        if (clientVersion >= 9) {
-            w.writeU32(actualMax)
-            w.writeU32(actualFrag)
-        }
-        if (clientVersion >= 12) {
-            w.writeSampleSpec(PASampleFormat.S16LE, recordChannels, actualRate.toLong())
-            w.writeChannelMap(recordMap)
-            w.writeU32(0L)                             // source index
-            w.writeString("AndroidSource")
-            w.writeBoolean(false)                      // not suspended
-        }
-        if (clientVersion >= 13) {
-            w.writeUsec(0L)                            // configured_source_latency
-        }
-        if (clientVersion >= 22) {
-            w.writeFormatInfo(PASampleFormat.S16LE, recordChannels, actualRate)
-        }
-        val replyBytes = w.toByteArray()
-        sendCommand(replyBytes)
-
-        if (peakDetect) {
-            // Peak meter stream: send silence at the requested rate, no real AudioRecord needed
-            Log.i(TAG, "Peak detect stream: rate=$actualRate fragsize=$actualFrag — sending silence")
-            startPeakMeterLoop(chanId, actualFrag.toInt(), actualRate)
-        } else {
-            // Normal mic capture
-            audioRecorder = AudioRecorder(actualRate, recordChannels)
-            startRecordLoop(chanId, actualFrag.toInt())
-            onStatus("Record stream created (mic active)")
-        }
+    private fun rejectRecordStream(tag: Long) {
+        Log.i(TAG, "CREATE_RECORD rejected: playback-only server")
+        sendError(tag, PAError.NOT_SUPPORTED)
     }
 
     private fun handleSetSinkVolume(r: TagStructReader, tag: Long, hasName: Boolean = true) {
@@ -411,17 +313,6 @@ class PulseClientHandler(
         sendSubscribeEvent(PASubscription.FACILITY_SINK, 0)
     }
 
-    private fun handleSetSourceVolume(r: TagStructReader, tag: Long, hasName: Boolean = true) {
-        r.readU32()
-        if (hasName) r.readString()
-        val volumes = r.readCVolume()
-        val maxVol = volumes.maxOrNull() ?: PAConst.VOLUME_NORM
-        ServerAudioState.sourceVolume.set(maxVol)
-        Log.i(TAG, "SET_SOURCE_VOLUME: pa_vol=$maxVol (no-op on AudioRecord)")
-        sendReply(tag)
-        sendSubscribeEvent(PASubscription.FACILITY_SOURCE, 0)
-    }
-
     private fun handleSetSinkMute(r: TagStructReader, tag: Long, hasName: Boolean = true) {
         r.readU32()
         if (hasName) r.readString()
@@ -431,16 +322,6 @@ class PulseClientHandler(
         Log.i(TAG, "SET_SINK_MUTE: mute=$mute")
         sendReply(tag)
         sendSubscribeEvent(PASubscription.FACILITY_SINK, 0)
-    }
-
-    private fun handleSetSourceMute(r: TagStructReader, tag: Long, hasName: Boolean = true) {
-        r.readU32()
-        if (hasName) r.readString()
-        val mute = r.readBoolean()
-        ServerAudioState.sourceMuted.set(mute)
-        Log.i(TAG, "SET_SOURCE_MUTE: mute=$mute (no-op on AudioRecord)")
-        sendReply(tag)
-        sendSubscribeEvent(PASubscription.FACILITY_SOURCE, 0)
     }
 
     private fun sendSubscribeEvent(facility: Int, index: Int) {
@@ -504,13 +385,6 @@ class PulseClientHandler(
         stopPlaybackStream()
         sendReply(tag)
         onStatus("Playback stream deleted")
-    }
-
-    private fun handleDeleteRecord(r: TagStructReader, tag: Long) {
-        val chanId = r.readU32()
-        stopRecordStream()
-        sendReply(tag)
-        onStatus("Record stream deleted")
     }
 
     private fun handleGetServerInfo(tag: Long) {
@@ -578,55 +452,6 @@ class PulseClientHandler(
         }
     }
 
-    private fun handleGetSourceInfo(r: TagStructReader, tag: Long) {
-        // GET_SOURCE_INFO: U32 index, STRING name  (GET_SOURCE_INFO_LIST has no args)
-        if (r.remaining() > 0) { r.readU32(); if (r.remaining() > 0) r.readString() }
-        val w = TagStructWriter()
-        w.writeU32(PACommand.REPLY.toLong())
-        w.writeU32(tag)
-        writeSourceInfo(w)
-        sendCommand(w.toByteArray())
-    }
-
-    private fun writeSourceInfo(w: TagStructWriter) {
-        val srcChannels = 1  // mic is always mono
-        val srcRate     = PAConst.SAMPLE_RATE.toLong()
-        w.writeU32(0L)
-        w.writeString("AndroidSource")
-        w.writeString("Android Microphone Source")
-        w.writeSampleSpec(PAConst.SAMPLE_FORMAT, srcChannels, srcRate)
-        w.writeChannelMap(byteArrayOf(3))  // MONO
-        w.writeU32(PAConst.INVALID_INDEX)
-        w.writeCVolume(LongArray(srcChannels) { ServerAudioState.sourceVolume.get() })
-        w.writeBoolean(ServerAudioState.sourceMuted.get())
-        w.writeU32(PAConst.INVALID_INDEX)    // monitor of sink (not a monitor source)
-        w.writeString(null)                  // monitor of sink name
-        w.writeUsec(10_000L)
-        w.writeString("module-null-source")
-        w.writeU32(0x08L)                    // flags: PA_SOURCE_LATENCY(0x08)
-        if (clientVersion >= 13) {
-            w.writeProplistStrings(mapOf(
-                "device.description" to "Android Microphone",
-                "device.class" to "sound"
-            ))
-            w.writeUsec(10_000L)
-        }
-        if (clientVersion >= 15) {
-            w.writeVolume(PAConst.VOLUME_NORM) // base_volume (PA_TAG_VOLUME 'V')
-            w.writeU32(0L)                     // state (PA_SOURCE_IDLE=0)
-            w.writeU32(65537L)                 // n_volume_steps
-            w.writeU32(PAConst.INVALID_INDEX)  // card index
-        }
-        if (clientVersion >= 16) {
-            w.writeU32(1L)  // n_ports = 1
-            // port entry: name, description, priority
-            w.writeString("analog-input-microphone")
-            w.writeString("Microphone")
-            w.writeU32(8700L)  // priority
-            w.writeString("analog-input-microphone")  // active port name
-        }
-    }
-
     private fun handleLookupSink(r: TagStructReader, tag: Long) {
         val name = r.readString()
         Log.d(TAG, "LOOKUP_SINK name=$name")
@@ -634,16 +459,6 @@ class PulseClientHandler(
         w.writeU32(PACommand.REPLY.toLong())
         w.writeU32(tag)
         w.writeU32(0L)  // sink index 0
-        sendCommand(w.toByteArray())
-    }
-
-    private fun handleLookupSource(r: TagStructReader, tag: Long) {
-        val name = r.readString()
-        Log.d(TAG, "LOOKUP_SOURCE name=$name")
-        val w = TagStructWriter()
-        w.writeU32(PACommand.REPLY.toLong())
-        w.writeU32(tag)
-        w.writeU32(0L)  // source index 0
         sendCommand(w.toByteArray())
     }
 
@@ -745,76 +560,6 @@ class PulseClientHandler(
         }
     }
 
-    // ─── Record loop ──────────────────────────────────────────────────────────
-
-    private fun startPeakMeterLoop(channelId: Int, fragSize: Int, rate: Int) {
-        recordJob = scope.launch(Dispatchers.IO) {
-            val buf = ByteArray(fragSize.coerceAtLeast(2))
-            val intervalMs = (fragSize.toLong() * 1000L) / (rate.toLong() * 2L).coerceAtLeast(1L)
-            Log.i(TAG, "Peak meter loop started: channel=$channelId fragSize=$fragSize intervalMs=$intervalMs")
-            while (isActive && socket.isConnected && !socket.isClosed) {
-                val frame = PulseFrame.audio(channelId, buf)
-                synchronized(writeLock) {
-                    try { frame.writeTo(output) } catch (_: Exception) { return@launch }
-                }
-                delay(intervalMs.coerceAtLeast(5L))
-            }
-        }
-    }
-
-    private fun stopRecordStream() {
-        recordJob?.cancel()
-        recordJob = null
-        audioRecorder?.stop()
-        audioRecorder = null
-        recordChannelId = null
-        if (holdingMicLock.getAndSet(false)) {
-            micLock.unlock()
-            Log.d(TAG, "micLock released")
-        }
-    }
-
-    private fun startRecordLoop(channelId: Int, fragSize: Int) {
-        Log.i(TAG, "startRecordLoop called: channel=$channelId fragSize=$fragSize")
-        if (!micLock.tryLock()) {
-            Log.w(TAG, "Mic already in use by another stream, dropping record request")
-            audioRecorder?.stop()
-            audioRecorder = null
-            return
-        }
-        holdingMicLock.set(true)
-
-        recordJob = scope.launch(Dispatchers.IO) {
-            try {
-                val recorder = audioRecorder ?: return@launch
-                recorder.start()
-                val buf = ByteArray(fragSize.coerceAtLeast(1024).coerceAtMost(65536))
-                Log.i(TAG, "Record loop started: channel=$channelId fragSize=$fragSize bufSize=${buf.size}")
-                var sendError = false
-                while (isActive && socket.isConnected && !socket.isClosed && !sendError) {
-                    val read = recorder.read(buf)
-                    if (read > 0) {
-                        val audioFrame = PulseFrame.audio(channelId, buf.copyOf(read))
-                        synchronized(writeLock) {
-                            try {
-                                audioFrame.writeTo(output)
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Record send error: ${e.message}")
-                                sendError = true
-                            }
-                        }
-                    }
-                }
-                Log.i(TAG, "Record loop exited: channel=$channelId")
-            } finally {
-                if (holdingMicLock.getAndSet(false)) {
-                    micLock.unlock()
-                    Log.d(TAG, "micLock released from loop finally")
-                }
-            }
-        }
-    }
-
     // ─── Wire helpers ─────────────────────────────────────────────────────────
 
     /** Send a simple REPLY with no additional fields */
@@ -852,7 +597,6 @@ class PulseClientHandler(
     // ─── Cleanup ──────────────────────────────────────────────────────────────
 
     private fun cleanup() {
-        stopRecordStream()
         stopPlaybackStream()
         runCatching { socket.close() }
     }

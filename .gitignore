@@ -5,6 +5,10 @@ local.properties
 *.apk
 *.aab
 *.keystore
+*.jks
+*.p12
+keystore/
+keystore.properties
 .idea/
 *.iml
 gradle/wrapper/gradle-wrapper.jar

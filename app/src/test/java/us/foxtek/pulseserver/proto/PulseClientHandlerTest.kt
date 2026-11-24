@@ -4,7 +4,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.sync.Mutex
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -179,7 +178,7 @@ class PulseClientHandlerTest {
     }
 
     @Test
-    fun lookupSinkAndSourceReturnIndexZero() {
+    fun lookupSinkReturnsIndexAndSourceIsMissing() {
         withHarness { h ->
             h.authV16()
             h.sendCommand(
@@ -198,20 +197,18 @@ class PulseClientHandlerTest {
                 body = { it.writeString("AndroidSource") }
             )
             val source = TagStructReader(h.readCommandFrame().payload)
-            assertEquals(PACommand.REPLY.toLong(), source.readU32())
+            assertEquals(PACommand.ERROR.toLong(), source.readU32())
             assertEquals(21L, source.readU32())
-            assertEquals(0L, source.readU32())
+            assertEquals(PAError.NO_ENTITY.toLong(), source.readU32())
         }
     }
 
     @Test
-    fun getSinkAndSourceInfoReflectSharedVolumeAndMute() {
+    fun getSinkInfoReflectsSharedVolumeAndMuteAndSourceIsMissing() {
         withHarness { h ->
             h.authV16()
             ServerAudioState.sinkVolume.set(44_444L)
             ServerAudioState.sinkMuted.set(true)
-            ServerAudioState.sourceVolume.set(33_333L)
-            ServerAudioState.sourceMuted.set(true)
 
             h.sendCommand(
                 command = PACommand.GET_SINK_INFO,
@@ -245,17 +242,9 @@ class PulseClientHandlerTest {
             )
 
             val source = TagStructReader(h.readCommandFrame().payload)
-            assertEquals(PACommand.REPLY.toLong(), source.readU32())
+            assertEquals(PACommand.ERROR.toLong(), source.readU32())
             assertEquals(31L, source.readU32())
-            assertEquals(0L, source.readU32())
-            assertEquals("AndroidSource", source.readString())
-            assertEquals("Android Microphone Source", source.readString())
-            source.readSampleSpec()
-            source.readChannelMap()
-            source.readU32()
-            val sourceVol = source.readCVolume()
-            assertEquals(33_333L, sourceVol[0])
-            assertEquals(true, source.readBoolean())
+            assertEquals(PAError.NO_ENTITY.toLong(), source.readU32())
         }
     }
 
@@ -288,10 +277,9 @@ class PulseClientHandlerTest {
     }
 
     @Test
-    fun setSourceVolumeAndMuteUpdateStateAndEmitEvents() {
+    fun setSourceVolumeAndMuteAreAckedWithoutEvents() {
         withHarness { h ->
             h.authV16()
-            resetAudioState()
 
             h.sendCommand(
                 command = PACommand.SET_SOURCE_VOLUME,
@@ -305,14 +293,7 @@ class PulseClientHandlerTest {
             val volumeReply = TagStructReader(h.readCommandFrame().payload)
             assertEquals(PACommand.REPLY.toLong(), volumeReply.readU32())
             assertEquals(50L, volumeReply.readU32())
-            val volumeEvent = TagStructReader(h.readCommandFrame().payload)
-            assertEquals(PACommand.SUBSCRIBE_EVENT.toLong(), volumeEvent.readU32())
-            volumeEvent.readU32()
-            assertEquals(
-                (PASubscription.EVENT_CHANGE or PASubscription.FACILITY_SOURCE).toLong(),
-                volumeEvent.readU32()
-            )
-            assertEquals(31_000L, ServerAudioState.sourceVolume.get())
+            assertEquals(0, volumeReply.remaining())
 
             h.sendCommand(
                 command = PACommand.SET_SOURCE_MUTE,
@@ -326,11 +307,7 @@ class PulseClientHandlerTest {
             val muteReply = TagStructReader(h.readCommandFrame().payload)
             assertEquals(PACommand.REPLY.toLong(), muteReply.readU32())
             assertEquals(51L, muteReply.readU32())
-            val muteEvent = TagStructReader(h.readCommandFrame().payload)
-            assertEquals(PACommand.SUBSCRIBE_EVENT.toLong(), muteEvent.readU32())
-            muteEvent.readU32()
-            assertEquals((PASubscription.EVENT_CHANGE or PASubscription.FACILITY_SOURCE).toLong(), muteEvent.readU32())
-            assertEquals(true, ServerAudioState.sourceMuted.get())
+            assertEquals(0, muteReply.remaining())
         }
     }
 
@@ -357,7 +334,7 @@ class PulseClientHandlerTest {
     }
 
     @Test
-    fun createAndDeleteRecordStreamAndCorkPlaybackReply() {
+    fun createRecordStreamIsRejectedAndRecordCommandsAck() {
         withHarness { h ->
             h.authV16()
             h.sendCommand(
@@ -367,10 +344,9 @@ class PulseClientHandlerTest {
             )
 
             val createReply = TagStructReader(h.readCommandFrame().payload)
-            assertEquals(PACommand.REPLY.toLong(), createReply.readU32())
+            assertEquals(PACommand.ERROR.toLong(), createReply.readU32())
             assertEquals(70L, createReply.readU32())
-            assertEquals(1L, createReply.readU32())
-            assertEquals(0L, createReply.readU32())
+            assertEquals(PAError.NOT_SUPPORTED.toLong(), createReply.readU32())
 
             h.sendCommand(
                 command = PACommand.CORK_PLAYBACK_STREAM,
@@ -392,7 +368,6 @@ class PulseClientHandlerTest {
             val deleteReply = TagStructReader(h.readCommandFrame().payload)
             assertEquals(PACommand.REPLY.toLong(), deleteReply.readU32())
             assertEquals(72L, deleteReply.readU32())
-            assertTrue(h.awaitStatusContaining("Record stream deleted"))
         }
     }
 
@@ -439,7 +414,7 @@ class PulseClientHandlerTest {
             val source = TagStructReader(h.readCommandFrame().payload)
             assertEquals(PACommand.REPLY.toLong(), source.readU32())
             assertEquals(91L, source.readU32())
-            assertEquals(0L, source.readU32())
+            assertEquals(0, source.remaining())
         }
     }
 
@@ -508,9 +483,7 @@ class PulseClientHandlerTest {
 
     private fun resetAudioState() {
         ServerAudioState.sinkVolume.set(PAConst.VOLUME_NORM)
-        ServerAudioState.sourceVolume.set(PAConst.VOLUME_NORM)
         ServerAudioState.sinkMuted.set(false)
-        ServerAudioState.sourceMuted.set(false)
     }
 
     private class Harness {
@@ -522,8 +495,7 @@ class PulseClientHandlerTest {
         private val handler = PulseClientHandler(
             serverClient,
             { msg -> synchronized(statuses) { statuses.add(msg) } },
-            scope,
-            Mutex()
+            scope
         )
         private val runner = thread(start = true, name = "PulseClientHandlerTest") { handler.run() }
         private val input = BufferedInputStream(clientSocket.getInputStream())

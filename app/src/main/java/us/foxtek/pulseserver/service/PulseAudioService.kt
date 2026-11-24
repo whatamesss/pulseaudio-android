@@ -16,7 +16,6 @@ import us.foxtek.pulseserver.proto.PAConst
 import us.foxtek.pulseserver.proto.PulseClientHandler
 import us.foxtek.pulseserver.ui.MainActivity
 import kotlinx.coroutines.*
-import kotlinx.coroutines.sync.Mutex
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.Collections
@@ -50,7 +49,6 @@ class PulseAudioService : LifecycleService() {
 
     private var serverSocket: ServerSocket? = null
     private var serverJob: Job? = null
-    private val micLock = Mutex()
     private var activePort: Int = DEFAULT_PORT
     private val clientSockets = Collections.synchronizedSet(mutableSetOf<Socket>())
     private val mpdOutput by lazy { MpdOutputController(this, lifecycleScope) }
@@ -115,10 +113,10 @@ class PulseAudioService : LifecycleService() {
                     Log.i(TAG, "Client connected: ${client.inetAddress.hostAddress}")
 
                     // Each connection gets its own independent child scope so
-                    // a new connection never cancels an existing record/playback stream.
+                    // a new connection never cancels an existing playback stream.
                     launch {
                         try {
-                            val handler = PulseClientHandler(client, ::onStatus, this, micLock)
+                            val handler = PulseClientHandler(client, ::onStatus, this)
                             withContext(Dispatchers.IO) { handler.run() }
                         } finally {
                             clientSockets.remove(client)

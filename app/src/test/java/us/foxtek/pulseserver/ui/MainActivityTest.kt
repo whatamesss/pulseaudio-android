@@ -34,7 +34,6 @@ class MainActivityTest {
         idleMain()
         assertEquals("Start Server", activity.view<Button>(R.id.btnToggle).text.toString())
         assertEquals("Server stopped", activity.view<TextView>(R.id.tvStatus).text.toString())
-        assertFalse(activity.view<Button>(R.id.btnCopyIp).isEnabled)
 
         invokeOnStateChanged(activity, ServerState.Starting)
         idleMain()
@@ -44,8 +43,6 @@ class MainActivityTest {
         invokeOnStateChanged(activity, ServerState.Running(port = 4713, ip = "10.0.0.2"))
         idleMain()
         assertEquals("10.0.0.2:4713", activity.view<TextView>(R.id.tvAddress).text.toString())
-        assertTrue(activity.view<Button>(R.id.btnCopyIp).isEnabled)
-        assertTrue(activity.view<TextView>(R.id.tvHint).text.toString().contains("module-tunnel-sink"))
 
         invokeOnStateChanged(activity, ServerState.ClientConnected("10.0.0.9"))
         idleMain()
@@ -54,7 +51,6 @@ class MainActivityTest {
         invokeOnStateChanged(activity, ServerState.Error("boom"))
         idleMain()
         assertEquals("Error: boom", activity.view<TextView>(R.id.tvStatus).text.toString())
-        assertFalse(activity.view<Button>(R.id.btnCopyIp).isEnabled)
     }
 
     @Test
@@ -74,18 +70,11 @@ class MainActivityTest {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         activity.onRequestPermissionsResult(
             100,
-            arrayOf("android.permission.RECORD_AUDIO"),
+            arrayOf("android.permission.POST_NOTIFICATIONS"),
             intArrayOf(PackageManager.PERMISSION_DENIED)
         )
         idleMain()
-        assertEquals("Microphone permission required", activity.view<TextView>(R.id.tvStatus).text.toString())
-    }
-
-    @Test
-    fun buildConnectionHintContainsIpAndPort() {
-        val hint = buildConnectionHint("10.1.2.3", 4713)
-        assertTrue(hint.contains("tcp:10.1.2.3:4713"))
-        assertTrue(hint.contains("module-tunnel-source"))
+        assertEquals("Notification permission required", activity.view<TextView>(R.id.tvStatus).text.toString())
     }
 
     @Test
@@ -122,54 +111,6 @@ class MainActivityTest {
     }
 
     @Test
-    fun copyConnectionInfoWritesClipboardAndHint() {
-        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
-        val service = PulseAudioService()
-        setPrivateField(service, "state", ServerState.Running(4713, "10.3.4.5"))
-        setPrivateField(activity, "service", service)
-
-        val m = MainActivity::class.java.getDeclaredMethod("copyConnectionInfo")
-        m.isAccessible = true
-        m.invoke(activity)
-
-        val clipboard = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-            as android.content.ClipboardManager
-        val clip = clipboard.primaryClip
-        assertTrue(clip != null && clip.itemCount > 0)
-        assertEquals("10.3.4.5:4713", clip?.getItemAt(0)?.text?.toString())
-        assertTrue(activity.view<TextView>(R.id.tvHint).text.toString().contains("Copied:"))
-    }
-
-    @Test
-    fun copyConnectionInfoWithNoServiceReturnsEarly() {
-        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
-        setPrivateField(activity, "service", null)
-
-        val m = MainActivity::class.java.getDeclaredMethod("copyConnectionInfo")
-        m.isAccessible = true
-        m.invoke(activity)
-
-        assertTrue(activity.view<TextView>(R.id.tvHint).text.toString().isEmpty())
-    }
-
-    @Test
-    fun copyConnectionInfoUsesDefaultPortForClientConnectedState() {
-        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
-        val service = PulseAudioService()
-        setPrivateField(service, "state", ServerState.ClientConnected("10.9.8.7"))
-        setPrivateField(activity, "service", service)
-
-        val m = MainActivity::class.java.getDeclaredMethod("copyConnectionInfo")
-        m.isAccessible = true
-        m.invoke(activity)
-
-        val clipboard = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-            as android.content.ClipboardManager
-        val text = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-        assertEquals("10.9.8.7:4713", text)
-    }
-
-    @Test
     fun toggleServerStopsWhenServiceRunning() {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val service = PulseAudioService()
@@ -184,11 +125,12 @@ class MainActivityTest {
     }
 
     @Test
-    fun requiredPermissionsIncludeMicrophone() {
-        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
-        assertTrue(requiredPermissions().contains(android.Manifest.permission.RECORD_AUDIO))
-        // Robolectric grants no runtime permissions by default.
-        assertFalse(hasRequiredPermissions(activity))
+    fun requiredPermissionsArePlaybackOnly() {
+        assertFalse(requiredPermissions().contains(android.Manifest.permission.RECORD_AUDIO))
+        assertEquals(
+            listOf(android.Manifest.permission.POST_NOTIFICATIONS),
+            requiredPermissions()
+        )
     }
 
     @Test
@@ -197,7 +139,7 @@ class MainActivityTest {
         setPrivateField(activity, "service", null)
         activity.onRequestPermissionsResult(
             100,
-            arrayOf("android.permission.RECORD_AUDIO"),
+            arrayOf("android.permission.POST_NOTIFICATIONS"),
             intArrayOf(PackageManager.PERMISSION_GRANTED)
         )
         idleMain()

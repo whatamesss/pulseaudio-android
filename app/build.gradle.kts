@@ -1,8 +1,20 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.detekt)
     alias(libs.plugins.kover)
+}
+
+// Local-only signing credentials. keystore.properties and the keystore itself
+// are gitignored; see README for how to create them. Without the file the
+// release build still assembles, but the APK is left unsigned.
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
 }
 
 android {
@@ -17,12 +29,21 @@ android {
         versionName = "1.0"
     }
 
+    signingConfigs {
+        if (keystoreProperties.isNotEmpty()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Sideloaded builds only: sign with the local Android debug key so
-            // release APKs can be installed over debug builds.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -75,6 +96,15 @@ android {
     }
 }
 
+// This app is only ever built and installed as a release variant. Disabling
+// the debug variant keeps `assemble`, `install`, tests, lint, and coverage on
+// the release build so nothing can drift between "debug" and "release".
+androidComponents {
+    beforeVariants(selector().withBuildType("debug")) { variant ->
+        variant.enable = false
+    }
+}
+
 detekt {
     buildUponDefaultConfig = true
     allRules = false
@@ -84,8 +114,14 @@ detekt {
 
 tasks.register("qualityCheck") {
     group = "verification"
-    description = "Runs tests, lint, detekt, and Kotlin coverage"
-    dependsOn("testDebugUnitTest", "lintDebug", "detekt", "koverXmlReportDebug", "koverHtmlReportDebug")
+    description = "Runs release tests, lint, detekt, and Kotlin coverage"
+    dependsOn(
+        "testReleaseUnitTest",
+        "lintRelease",
+        "detekt",
+        "koverXmlReportRelease",
+        "koverHtmlReportRelease"
+    )
 }
 
 dependencies {
