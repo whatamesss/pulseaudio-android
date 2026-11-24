@@ -153,6 +153,22 @@ class AudioPlayerTest {
     }
 
     @Test
+    fun unmuteRestoresPreviousVolume() {
+        val player = AudioPlayer(44_100, 1, PASampleFormat.S16LE)
+        val track = mockk<AudioTrack>(relaxed = true)
+        val volumes = mutableListOf<Float>()
+        every { track.setVolume(capture(volumes)) } returns 0
+
+        setPrivateTrack(player, track)
+
+        player.setVolume(0.4f)
+        player.setMute(true)
+        player.setMute(false)
+
+        assertEquals(listOf(0.4f, 0f, 0.4f), volumes)
+    }
+
+    @Test
     fun stopHandlesTrackExceptions() {
         val player = AudioPlayer(44_100, 1, PASampleFormat.S16LE)
         val track = mockk<AudioTrack>(relaxed = true)

@@ -15,6 +15,7 @@ class PcmAudioQueue(
     private var queuedBytes = 0
     private val lock = Object()
 
+    /** Number of packets (frames) evicted because the queue was full. */
     val droppedFrames = AtomicLong(0)
 
     init {
@@ -49,6 +50,7 @@ class PcmAudioQueue(
     fun clear() = synchronized(lock) {
         queue.clear()
         queuedBytes = 0
+        lock.notifyAll()
     }
 
     fun size(): Int = synchronized(lock) { queue.size }

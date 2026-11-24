@@ -8,7 +8,10 @@ import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
+import java.io.IOException
 import java.io.InputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 class PulseFrameTest {
 
@@ -50,6 +53,20 @@ class PulseFrameTest {
     @Test(expected = EOFException::class)
     fun readThrowsOnHeaderEof() {
         PulseFrame.read(ByteArrayInputStream(byteArrayOf(1, 2, 3)))
+    }
+
+    @Test(expected = IOException::class)
+    fun readRejectsOversizedPayload() {
+        val header = ByteBuffer.allocate(PulseFrame.DESCRIPTOR_SIZE)
+            .order(ByteOrder.BIG_ENDIAN)
+            .putInt(PulseFrame.MAX_PAYLOAD_SIZE + 1)
+            .putInt(PAConst.CHANNEL_CMD.toInt())
+            .putInt(0)
+            .putInt(0)
+            .putInt(0)
+            .array()
+
+        PulseFrame.read(ByteArrayInputStream(header))
     }
 
     @Test(expected = EOFException::class)

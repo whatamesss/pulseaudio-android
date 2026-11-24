@@ -1,12 +1,10 @@
 package us.foxtek.pulseserver.ui
 
-import android.Manifest
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.view.inputmethod.EditorInfo
@@ -15,8 +13,11 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import us.foxtek.pulseserver.databinding.ActivityMainBinding
 import us.foxtek.pulseserver.proto.PAConst
+import us.foxtek.pulseserver.proto.PulseAuthCookie
 import us.foxtek.pulseserver.service.PulseAudioService
 import us.foxtek.pulseserver.service.ServerState
+
+private const val REQUEST_PERMISSIONS = 100
 
 class MainActivity : AppCompatActivity() {
 
@@ -59,6 +60,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnToggle.setOnClickListener { toggleServer() }
         binding.btnCopyIp.setOnClickListener { copyConnectionInfo() }
+        binding.btnCopyCookie.setOnClickListener { copyCookie() }
 
         // Bind to service if already running
         bindService(
@@ -99,8 +101,10 @@ class MainActivity : AppCompatActivity() {
 
         when (svc.state) {
             is ServerState.Idle, is ServerState.Error -> {
-                if (!checkPermissions()) {
-                    requestPermissions()
+                if (!hasRequiredPermissions(this)) {
+                    ActivityCompat.requestPermissions(
+                        this, requiredPermissions().toTypedArray(), REQUEST_PERMISSIONS
+                    )
                     return
                 }
                 savePort()
@@ -142,7 +146,10 @@ class MainActivity : AppCompatActivity() {
                     binding.btnToggle.text = "Stop Server"
                     binding.tvStatus.text = "Listening — waiting for client"
                     binding.tvAddress.text = "${state.ip}:${state.port}"
-                    binding.tvHint.text = buildHint(state.ip, state.port)
+                    binding.tvHint.text = buildConnectionHint(
+                        state.ip, state.port,
+                        PulseAuthCookie.toHex(PulseAuthCookie.get(this))
+                    )
                     binding.btnCopyIp.isEnabled = true
                 }
                 is ServerState.ClientConnected -> {
@@ -160,16 +167,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildHint(ip: String, port: Int): String = """
-        On your Linux PC, add to /etc/pulse/default.pa:
-        
-        load-module module-tunnel-sink   server=tcp:$ip:$port
-        load-module module-tunnel-source server=tcp:$ip:$port
-        
-        Or connect with pactl:
-        PULSE_SERVER=tcp:$ip:$port paplay /path/to/file.wav
-    """.trimIndent()
-
     private fun copyConnectionInfo() {
         val s = service ?: return
         val text = when (val st = s.state) {
@@ -177,36 +174,23 @@ class MainActivity : AppCompatActivity() {
             is ServerState.ClientConnected -> "${st.ip}:${PortPreferences.load(this)}"
             else -> return
         }
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("PA address", text))
+        copyToClipboard(this, "PA address", text)
         binding.tvHint.text = "Copied: $text\n\n${binding.tvHint.text}"
     }
 
-    // ─── Permissions ──────────────────────────────────────────────────────────
-
-    private fun checkPermissions(): Boolean {
-        val required = mutableListOf(Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            required.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        return required.all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        }
-    }
-
-    private fun requestPermissions() {
-        val required = mutableListOf(Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            required.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        ActivityCompat.requestPermissions(this, required.toTypedArray(), 100)
+    private fun copyCookie() {
+        val hex = PulseAuthCookie.toHex(PulseAuthCookie.get(this))
+        copyToClipboard(this, "PA auth cookie", hex)
+        binding.tvHint.text = "Auth cookie copied.\n\n${binding.tvHint.text}"
     }
 
     override fun onRequestPermissionsResult(
         requestCode: Int, permissions: Array<String>, grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 100 && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+        if (requestCode == REQUEST_PERMISSIONS &&
+            grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+        ) {
             toggleServer()
         } else {
             binding.tvStatus.text = "Microphone permission required"

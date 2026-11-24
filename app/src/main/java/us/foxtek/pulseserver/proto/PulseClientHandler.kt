@@ -28,7 +28,8 @@ class PulseClientHandler(
     private val socket: Socket,
     private val onStatus: (String) -> Unit,
     private val scope: CoroutineScope,
-    private val micLock: kotlinx.coroutines.sync.Mutex
+    private val micLock: kotlinx.coroutines.sync.Mutex,
+    private val authCookie: ByteArray = ByteArray(PAConst.COOKIE_LENGTH)
 ) {
     private val input  = BufferedInputStream(socket.getInputStream())
     private val output = BufferedOutputStream(socket.getOutputStream())
@@ -36,6 +37,7 @@ class PulseClientHandler(
 
     // Negotiated protocol version (filled in during AUTH)
     private var clientVersion = 0
+    private var authorized = false
 
     // Stream state
     private var playbackChannelId: Int? = null   // channel for incoming PCM from PA client
@@ -51,6 +53,7 @@ class PulseClientHandler(
     private var playbackCorked  = false
 
     // Volume state is shared across all connections via ServerAudioState
+    private var playbackRequestJob: Job? = null
     private var recordJob: Job? = null
     private val holdingMicLock = AtomicBoolean(false)
 
@@ -87,6 +90,12 @@ class PulseClientHandler(
         val tag     = r.readU32()
 
         Log.d(TAG, "CMD $command tag=$tag")
+
+        if (!authorized && command != PACommand.AUTH && command != PACommand.EXIT) {
+            Log.w(TAG, "Rejected command $command before AUTH")
+            sendError(tag, PAError.ACCESS)
+            return
+        }
 
         when (command) {
             PACommand.AUTH                  -> handleAuth(r, tag)
@@ -136,8 +145,8 @@ class PulseClientHandler(
             PACommand.UPDATE_CLIENT_PROPLIST,
             PACommand.PREBUF_PLAYBACK_STREAM-> sendReply(tag)  // empty/ack reply
             PACommand.SUBSCRIBE             -> sendReply(tag)  // ack, don't track mask
-            PACommand.DRAIN_PLAYBACK_STREAM -> sendReply(tag)
-            PACommand.FLUSH_PLAYBACK_STREAM -> sendReply(tag)
+            PACommand.DRAIN_PLAYBACK_STREAM -> handleDrainPlayback(r, tag)
+            PACommand.FLUSH_PLAYBACK_STREAM -> handleFlushPlayback(r, tag)
             PACommand.TRIGGER_PLAYBACK_STREAM -> sendReply(tag)
             PACommand.CORK_PLAYBACK_STREAM  -> handleCorkPlayback(r, tag)
             PACommand.CORK_RECORD_STREAM    -> sendReply(tag)
@@ -159,7 +168,15 @@ class PulseClientHandler(
     private fun handleAuth(r: TagStructReader, tag: Long) {
         val versionWord = r.readU32()
         val remoteVersion = (versionWord and 0xFFFFL).toInt()
-        val _cookie       = r.readArbitrary()  // accept any cookie (open access)
+        val cookie = r.readArbitrary()
+
+        if (!PulseAuthCookie.matches(authCookie, cookie)) {
+            Log.w(TAG, "AUTH rejected: cookie mismatch")
+            sendError(tag, PAError.ACCESS)
+            runCatching { socket.close() }
+            return
+        }
+        authorized = true
 
         // Negotiate: use the lower of client and server version.
         // The client will cap itself to our advertised version for subsequent messages.
@@ -233,15 +250,27 @@ class PulseClientHandler(
 
         Log.i(TAG, "CREATE_PLAYBACK: format=$format ch=$channels rate=$rate corked=$corked")
 
-        val chanId = 0  // playback channel
-        playbackChannelId = chanId
-
         val actualRate   = if (rate > 0 && rate <= 192000) rate.toInt() else PAConst.SAMPLE_RATE
         val actualFormat = format
+        if (!isSupportedPlaybackFormat(actualFormat) || channels !in 1..2) {
+            Log.w(TAG, "Unsupported playback format=$actualFormat ch=$channels")
+            sendError(tag, PAError.NOT_SUPPORTED)
+            return
+        }
+
+        // A client may create a second stream without deleting the first.
+        if (audioPlayer != null) stopPlaybackStream()
+
+        val chanId = 0  // playback channel
+        playbackChannelId = chanId
         playbackCorked   = corked
-        audioPlayer = AudioPlayer(actualRate, channels, actualFormat)
-        audioPlayer?.startBuffered(scope)
-        if (corked) audioPlayer?.pause()
+
+        val player = AudioPlayer(actualRate, channels, actualFormat)
+        player.setVolume(sinkGain())
+        player.setMute(ServerAudioState.sinkMuted.get())
+        audioPlayer = player
+        player.startBuffered(scope)
+        if (corked) player.pause()
 
         // Echo back client's buffer attrs if valid, otherwise use our defaults
         val actualTl    = if (tlength   > 0 && tlength   != PAConst.INVALID_INDEX) tlength   else PAConst.TL_BYTES.toLong()
@@ -323,8 +352,22 @@ class PulseClientHandler(
 
         Log.i(TAG, "CREATE_RECORD: format=$format ch=$channels rate=$rate chanMap=${channelMap.toList()} fragsize=$fragsize")
 
+        if (channels !in 1..2) {
+            Log.w(TAG, "Unsupported record channel count: $channels")
+            sendError(tag, PAError.NOT_SUPPORTED)
+            return
+        }
+
+        // A client may create a second stream without deleting the first.
+        if (audioRecorder != null) stopRecordStream()
+
         val chanId = 1  // record channel
         recordChannelId = chanId
+
+        // AudioRecorder always captures S16LE. Reply with what we really send
+        // instead of echoing the client's requested format.
+        val recordChannels = channels
+        val recordMap = if (recordChannels == 1) byteArrayOf(3) else byteArrayOf(1, 2)
 
         val actualRate = if (rate > 0 && rate <= 192000) rate.toInt() else PAConst.SAMPLE_RATE
         // Use the client's requested fragsize if valid, otherwise our default
@@ -343,8 +386,8 @@ class PulseClientHandler(
             w.writeU32(actualFrag)
         }
         if (clientVersion >= 12) {
-            w.writeSampleSpec(format, channels, actualRate.toLong())
-            w.writeChannelMap(channelMap)              // echo client's channel map exactly
+            w.writeSampleSpec(PASampleFormat.S16LE, recordChannels, actualRate.toLong())
+            w.writeChannelMap(recordMap)
             w.writeU32(0L)                             // source index
             w.writeString("AndroidSource")
             w.writeBoolean(false)                      // not suspended
@@ -353,7 +396,7 @@ class PulseClientHandler(
             w.writeUsec(0L)                            // configured_source_latency
         }
         if (clientVersion >= 22) {
-            w.writeFormatInfo(format, channels, actualRate)
+            w.writeFormatInfo(PASampleFormat.S16LE, recordChannels, actualRate)
         }
         val replyBytes = w.toByteArray()
         sendCommand(replyBytes)
@@ -364,7 +407,7 @@ class PulseClientHandler(
             startPeakMeterLoop(chanId, actualFrag.toInt(), actualRate)
         } else {
             // Normal mic capture
-            audioRecorder = AudioRecorder(actualRate, channels)
+            audioRecorder = AudioRecorder(actualRate, recordChannels)
             startRecordLoop(chanId, actualFrag.toInt())
             onStatus("Record stream created (mic active)")
         }
@@ -377,7 +420,7 @@ class PulseClientHandler(
         // Use the max channel volume, normalised to 0..1
         val maxVol = volumes.maxOrNull() ?: PAConst.VOLUME_NORM
         ServerAudioState.sinkVolume.set(maxVol)
-        val gain = (maxVol.toFloat() / PAConst.VOLUME_NORM.toFloat()).coerceIn(0f, 1f)
+        val gain = sinkGain()
         audioPlayer?.setVolume(gain)
         Log.i(TAG, "SET_SINK_VOLUME: pa_vol=$maxVol gain=$gain")
         sendReply(tag)
@@ -439,7 +482,34 @@ class PulseClientHandler(
         sendReply(tag)
     }
 
+    private fun handleFlushPlayback(r: TagStructReader, tag: Long) {
+        r.readU32()  // channel index
+        audioPlayer?.flush()
+        playbackCredit = playbackTlength
+        sendReply(tag)
+    }
+
+    private fun handleDrainPlayback(r: TagStructReader, tag: Long) {
+        r.readU32()  // channel index
+        val drained = audioPlayer?.awaitDrained(2_000L) ?: true
+        if (!drained) Log.w(TAG, "DRAIN timed out with audio still queued")
+        sendReply(tag)
+    }
+
+    private fun sinkGain(): Float =
+        (ServerAudioState.sinkVolume.get().toFloat() / PAConst.VOLUME_NORM.toFloat())
+            .coerceIn(0f, 1f)
+
+    private fun isSupportedPlaybackFormat(format: Int): Boolean = when (format) {
+        PASampleFormat.S16LE, PASampleFormat.S16BE,
+        PASampleFormat.S32LE, PASampleFormat.S32BE,
+        PASampleFormat.FLOAT32LE, PASampleFormat.FLOAT32BE -> true
+        else -> false
+    }
+
     private fun stopPlaybackStream() {
+        playbackRequestJob?.cancel()
+        playbackRequestJob = null
         audioPlayer?.stop()
         audioPlayer = null
         playbackChannelId = null
@@ -675,7 +745,8 @@ class PulseClientHandler(
     // ─── Playback REQUEST loop ────────────────────────────────────────────────
 
     private fun startPlaybackRequestLoop(channelId: Int) {
-        scope.launch {
+        playbackRequestJob?.cancel()
+        playbackRequestJob = scope.launch {
             // Underflow guard: if credit goes stale (e.g. client paused),
             // send a REQUEST every 50ms to wake it up.
             delay(200L)

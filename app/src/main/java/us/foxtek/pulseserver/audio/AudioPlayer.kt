@@ -11,13 +11,16 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withTimeoutOrNull
 import us.foxtek.pulseserver.proto.PASampleFormat
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 private const val TAG = "AudioPlayer"
 
+@Suppress("TooManyFunctions")
 class AudioPlayer(
     private val sampleRate: Int,
     private val channels: Int,
@@ -36,6 +39,16 @@ class AudioPlayer(
 
     @Volatile
     private var playbackPaused = false
+
+    /** Set by stop(): the worker releases the track once its write/wait returns. */
+    @Volatile
+    private var releasePending = false
+
+    @Volatile
+    private var volume = 1f
+
+    @Volatile
+    private var muted = false
 
     private val bytesPerFrame: Int get() = when (paFormat) {
         PASampleFormat.FLOAT32LE, PASampleFormat.FLOAT32BE -> 4 * channels
@@ -63,6 +76,7 @@ class AudioPlayer(
             .setChannelMask(channelMask)
             .build()
 
+        releasePending = false
         track = trackFactory(
             attrs,
             fmt,
@@ -73,6 +87,7 @@ class AudioPlayer(
 
         playbackPaused = false
         track?.play()
+        applyVolume()
 
         Log.i(TAG, "AudioTrack started: rate=$sampleRate ch=$channels paFormat=$paFormat bufSize=$bufSize")
     }
@@ -82,6 +97,7 @@ class AudioPlayer(
      * Network reception can now enqueue PCM without waiting for AudioTrack.
      */
     fun startBuffered(scope: CoroutineScope, bufferMillis: Int = 300) {
+        stopWorker()
         if (track == null) start()
 
         val capacity = (
@@ -90,27 +106,19 @@ class AudioPlayer(
 
         pcmQueue = PcmAudioQueue(capacity)
 
-        playbackJob?.cancel()
         playbackJob = scope.launch(Dispatchers.IO) {
             Log.i(TAG, "Buffered playback started: capacity=$capacity bytes")
 
             try {
                 while (isActive) {
-                    if (playbackPaused) {
-                        delay(10)
-                        continue
-                    }
-
-                    val pcm = runInterruptible {
-                        pcmQueue?.take() ?: return@runInterruptible null
-                    } ?: continue
-
+                    val pcm = awaitPcm() ?: continue
                     write(pcm)
                 }
             } catch (e: InterruptedException) {
                 // Expected during shutdown.
             } finally {
                 Log.i(TAG, "Buffered playback worker stopped")
+                if (releasePending) releaseTrack()
             }
         }
     }
@@ -123,6 +131,23 @@ class AudioPlayer(
     fun queuedBytes(): Int = pcmQueue?.queuedBytes() ?: 0
 
     fun droppedFrames(): Long = pcmQueue?.droppedFrames?.get() ?: 0L
+
+    /** Drop buffered audio without touching the AudioTrack (PA FLUSH). */
+    fun flush() {
+        pcmQueue?.clear()
+    }
+
+    /**
+     * Wait until the queue has been consumed by the writer, or [timeoutMs]
+     * elapses. Returns true when the queue is empty.
+     */
+    fun awaitDrained(timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (queuedBytes() > 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(5)
+        }
+        return queuedBytes() == 0
+    }
 
     fun pause() {
         playbackPaused = true
@@ -143,11 +168,27 @@ class AudioPlayer(
     }
 
     fun setVolume(vol: Float) {
-        track?.setVolume(vol.coerceIn(0f, 1f))
+        if (!vol.isFinite()) return
+        volume = vol.coerceIn(0f, 1f)
+        applyVolume()
     }
 
     fun setMute(mute: Boolean) {
-        track?.setVolume(if (mute) 0f else 1f)
+        muted = mute
+        applyVolume()
+    }
+
+    private fun applyVolume() {
+        track?.setVolume(if (muted) 0f else volume)
+    }
+
+    private suspend fun awaitPcm(): ByteArray? {
+        val queue = if (playbackPaused) null else pcmQueue
+        if (queue == null) {
+            delay(10)
+            return null
+        }
+        return runInterruptible { queue.take() }
     }
 
     private fun toS16(pcm: ByteArray): ByteArray = when (paFormat) {
@@ -203,33 +244,55 @@ class AudioPlayer(
 
         val s16 = toS16(pcm)
         var offset = 0
+        var writing = true
 
-        while (offset < s16.size) {
+        while (offset < s16.size && writing) {
             val n = t.write(s16, offset, s16.size - offset)
-            if (n < 0) {
-                Log.w(TAG, "AudioTrack write error $n")
-                break
+            if (n > 0) {
+                offset += n
+            } else {
+                writing = false
+                if (n < 0) Log.w(TAG, "AudioTrack write error $n")
             }
-            if (n == 0) break
-            offset += n
         }
     }
 
     fun stop() {
         playbackPaused = true
-        playbackJob?.cancel()
-        playbackJob = null
+        releasePending = true
         pcmQueue?.clear()
         pcmQueue = null
 
-        try {
-            track?.stop()
-            track?.release()
-        } catch (e: Exception) {
-            Log.w(TAG, "stop: ${e.message}")
+        val job = playbackJob
+        playbackJob = null
+        job?.cancel()
+
+        if (job != null) {
+            runBlocking { withTimeoutOrNull(1_000L) { job.join() } }
         }
 
-        track = null
+        // The worker releases the track itself if it was inside write() when
+        // the join timed out; releasing here would race with the native call.
+        if (job == null || job.isCompleted) releaseTrack()
         Log.i(TAG, "AudioTrack stopped")
+    }
+
+    private fun stopWorker() {
+        val job = playbackJob ?: return
+        playbackJob = null
+        job.cancel()
+        runBlocking { withTimeoutOrNull(1_000L) { job.join() } }
+    }
+
+    @Synchronized
+    private fun releaseTrack() {
+        val t = track ?: return
+        track = null
+        try {
+            t.stop()
+            t.release()
+        } catch (e: Exception) {
+            Log.w(TAG, "release: ${e.message}")
+        }
     }
 }

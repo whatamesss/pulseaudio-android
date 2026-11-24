@@ -77,17 +77,12 @@ class MainActivityTest {
     }
 
     @Test
-    fun buildHintContainsIpAndPort() {
-        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
-        val m = MainActivity::class.java.getDeclaredMethod(
-            "buildHint",
-            String::class.java,
-            Int::class.javaPrimitiveType
-        )
-        m.isAccessible = true
-        val hint = m.invoke(activity, "10.1.2.3", 4713) as String
+    fun buildConnectionHintContainsIpPortAndCookie() {
+        val hint = buildConnectionHint("10.1.2.3", 4713, "deadbeef")
         assertTrue(hint.contains("tcp:10.1.2.3:4713"))
         assertTrue(hint.contains("module-tunnel-source"))
+        assertTrue(hint.contains("deadbeef"))
+        assertTrue(hint.contains(".config/pulse/cookie"))
     }
 
     @Test
@@ -166,16 +161,11 @@ class MainActivityTest {
     }
 
     @Test
-    fun checkPermissionsAndRequestPermissionsCanBeInvoked() {
+    fun requiredPermissionsIncludeMicrophone() {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
-        val check = MainActivity::class.java.getDeclaredMethod("checkPermissions")
-        check.isAccessible = true
-        val request = MainActivity::class.java.getDeclaredMethod("requestPermissions")
-        request.isAccessible = true
-
-        val result = check.invoke(activity) as Boolean
-        assertTrue(result || !result)
-        request.invoke(activity)
+        assertTrue(requiredPermissions().contains(android.Manifest.permission.RECORD_AUDIO))
+        // Robolectric grants no runtime permissions by default.
+        assertFalse(hasRequiredPermissions(activity))
     }
 
     @Test

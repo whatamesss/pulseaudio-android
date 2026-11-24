@@ -26,15 +26,16 @@ data class PulseFrame(
     companion object {
         const val DESCRIPTOR_SIZE = 20
 
+        /**
+         * Upper bound for a single frame payload. PulseAudio packets are normally
+         * well under 100 KiB; anything larger is either a bug or an attempt to
+         * exhaust memory with a 4-byte length field.
+         */
+        const val MAX_PAYLOAD_SIZE = 8 * 1024 * 1024
+
         /** Read one complete frame from an InputStream (blocking). */
         fun read(input: InputStream): PulseFrame {
-            val header = ByteArray(DESCRIPTOR_SIZE)
-            var read = 0
-            while (read < DESCRIPTOR_SIZE) {
-                val n = input.read(header, read, DESCRIPTOR_SIZE - read)
-                if (n < 0) throw java.io.EOFException("Connection closed while reading frame header")
-                read += n
-            }
+            val header = readFully(input, DESCRIPTOR_SIZE, "frame header")
             val bb = ByteBuffer.wrap(header).order(ByteOrder.BIG_ENDIAN)
             val length    = bb.int.toLong() and 0xFFFFFFFFL
             val channel   = bb.int.toLong() and 0xFFFFFFFFL
@@ -42,14 +43,25 @@ data class PulseFrame(
             val offsetLo  = bb.int.toLong() and 0xFFFFFFFFL
             val flags     = bb.int.toLong() and 0xFFFFFFFFL
 
-            val payload = ByteArray(length.toInt())
-            var pread = 0
-            while (pread < payload.size) {
-                val n = input.read(payload, pread, payload.size - pread)
-                if (n < 0) throw java.io.EOFException("Connection closed while reading frame payload")
-                pread += n
+            if (length > MAX_PAYLOAD_SIZE) {
+                throw java.io.IOException(
+                    "Frame payload too large: $length bytes (max $MAX_PAYLOAD_SIZE)"
+                )
             }
+
+            val payload = readFully(input, length.toInt(), "frame payload")
             return PulseFrame(channel, flags, offsetHi, offsetLo, payload)
+        }
+
+        private fun readFully(input: InputStream, size: Int, what: String): ByteArray {
+            val buffer = ByteArray(size)
+            var read = 0
+            while (read < size) {
+                val n = input.read(buffer, read, size - read)
+                if (n < 0) throw java.io.EOFException("Connection closed while reading $what")
+                read += n
+            }
+            return buffer
         }
 
         /** Build a command frame (CHANNEL=0xFFFFFFFF, FLAGS=0, OFFSETs=0). */

@@ -12,12 +12,14 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import us.foxtek.pulseserver.R
 import us.foxtek.pulseserver.proto.PAConst
+import us.foxtek.pulseserver.proto.PulseAuthCookie
 import us.foxtek.pulseserver.proto.PulseClientHandler
 import us.foxtek.pulseserver.ui.MainActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.Collections
 
 private const val TAG             = "PulseAudioService"
 private const val NOTIF_CHANNEL   = "pulse_server"
@@ -50,6 +52,8 @@ class PulseAudioService : LifecycleService() {
     private var serverJob: Job? = null
     private val micLock = Mutex()
     private var activePort: Int = DEFAULT_PORT
+    private var authCookie = ByteArray(PAConst.COOKIE_LENGTH)
+    private val clientSockets = Collections.synchronizedSet(mutableSetOf<Socket>())
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -85,6 +89,7 @@ class PulseAudioService : LifecycleService() {
     fun startServer(port: Int = DEFAULT_PORT) {
         if (serverJob?.isActive == true) return
         activePort = port
+        authCookie = PulseAuthCookie.get(this)
         state = ServerState.Starting
 
         startForeground(NOTIF_ID, buildNotification("Starting…"))
@@ -106,13 +111,21 @@ class PulseAudioService : LifecycleService() {
                         break
                     }
                     client.tcpNoDelay = true
+                    clientSockets.add(client)
                     Log.i(TAG, "Client connected: ${client.inetAddress.hostAddress}")
 
                     // Each connection gets its own independent child scope so
                     // a new connection never cancels an existing record/playback stream.
                     launch {
-                        val handler = PulseClientHandler(client, ::onStatus, this, micLock)
-                        withContext(Dispatchers.IO) { handler.run() }
+                        try {
+                            val handler = PulseClientHandler(
+                                client, ::onStatus, this, micLock, authCookie
+                            )
+                            withContext(Dispatchers.IO) { handler.run() }
+                        } finally {
+                            clientSockets.remove(client)
+                            runCatching { client.close() }
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -127,8 +140,13 @@ class PulseAudioService : LifecycleService() {
 
     fun stopServer() {
         serverJob?.cancel()
+        serverJob = null
         runCatching { serverSocket?.close() }
         serverSocket = null
+        synchronized(clientSockets) {
+            clientSockets.forEach { runCatching { it.close() } }
+            clientSockets.clear()
+        }
         state = ServerState.Idle
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()

@@ -62,7 +62,10 @@ android {
             "UnusedResources",
             "MonochromeLauncherIcon",
             "SetTextI18n",
-            "HardcodedText"
+            "HardcodedText",
+            // compileSdk/targetSdk stay on 34: AGP 8.3 does not support 35 and
+            // targetSdk 35 would force edge-to-edge on Android 15.
+            "OldTargetApi"
         )
     }
 }

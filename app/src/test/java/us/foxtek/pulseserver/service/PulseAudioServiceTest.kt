@@ -42,7 +42,9 @@ class PulseAudioServiceTest {
     fun startAndStopServerTransitionsState() {
         val service = Robolectric.buildService(PulseAudioService::class.java).create().get()
 
-        service.startServer()
+        // Port 0 lets the OS pick a free port; 4713 may be occupied by another
+        // PulseAudio instance on the machine running the tests.
+        service.startServer(0)
         Thread.sleep(150)
         assertTrue(service.state is ServerState.Starting || service.state is ServerState.Running)
 
@@ -53,7 +55,9 @@ class PulseAudioServiceTest {
     @Test
     fun onStartCommandStartThenDestroyEndsIdle() {
         val service = Robolectric.buildService(PulseAudioService::class.java).create().get()
-        val startIntent = Intent(service, PulseAudioService::class.java).setAction(PulseAudioService.ACTION_START)
+        val startIntent = Intent(service, PulseAudioService::class.java)
+            .setAction(PulseAudioService.ACTION_START)
+            .putExtra(PulseAudioService.EXTRA_PORT, 0)
         service.onStartCommand(startIntent, 0, 1)
         Thread.sleep(100)
         assertTrue(service.state is ServerState.Starting || service.state is ServerState.Running)

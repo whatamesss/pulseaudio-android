@@ -8,12 +8,15 @@ import kotlinx.coroutines.sync.Mutex
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.net.ServerSocket
 import java.net.Socket
 import kotlin.concurrent.thread
 
+@RunWith(RobolectricTestRunner::class)
 class PulseClientHandlerTest {
 
     @Test
@@ -50,8 +53,40 @@ class PulseClientHandlerTest {
     }
 
     @Test
+    fun wrongCookieIsRejected() {
+        withHarness { h ->
+            h.sendCommand(
+                command = PACommand.AUTH,
+                tag = 1,
+                body = {
+                    it.writeU32(16)
+                    it.writeArbitrary(ByteArray(PAConst.COOKIE_LENGTH) { 1 })
+                }
+            )
+
+            val reply = TagStructReader(h.readCommandFrame().payload)
+            assertEquals(PACommand.ERROR.toLong(), reply.readU32())
+            assertEquals(1L, reply.readU32())
+            assertEquals(PAError.ACCESS.toLong(), reply.readU32())
+        }
+    }
+
+    @Test
+    fun commandsBeforeAuthAreRejected() {
+        withHarness { h ->
+            h.sendCommand(command = PACommand.GET_SERVER_INFO, tag = 2)
+
+            val reply = TagStructReader(h.readCommandFrame().payload)
+            assertEquals(PACommand.ERROR.toLong(), reply.readU32())
+            assertEquals(2L, reply.readU32())
+            assertEquals(PAError.ACCESS.toLong(), reply.readU32())
+        }
+    }
+
+    @Test
     fun unsupportedCommandReturnsCommandError() {
         withHarness { h ->
+            h.authV16()
             h.sendCommand(command = 999, tag = 77)
 
             val reply = TagStructReader(h.readCommandFrame().payload)
@@ -177,6 +212,7 @@ class PulseClientHandlerTest {
     @Test
     fun lookupSinkAndSourceReturnIndexZero() {
         withHarness { h ->
+            h.authV16()
             h.sendCommand(
                 command = PACommand.LOOKUP_SINK,
                 tag = 20,
@@ -332,6 +368,7 @@ class PulseClientHandlerTest {
     @Test
     fun statAndAckCommandsReturnReply() {
         withHarness { h ->
+            h.authV16()
             h.sendCommand(command = PACommand.STAT, tag = 60)
             val stat = TagStructReader(h.readCommandFrame().payload)
             assertEquals(PACommand.REPLY.toLong(), stat.readU32())
@@ -393,10 +430,15 @@ class PulseClientHandlerTest {
     @Test
     fun ackOnlyCommandsReturnReply() {
         withHarness { h ->
-            h.sendCommand(command = PACommand.DRAIN_PLAYBACK_STREAM, tag = 80)
+            h.authV16()
+            h.sendCommand(command = PACommand.DRAIN_PLAYBACK_STREAM, tag = 80) {
+                it.writeU32(0)
+            }
             assertReplyTag(h.readCommandFrame(), 80)
 
-            h.sendCommand(command = PACommand.FLUSH_PLAYBACK_STREAM, tag = 81)
+            h.sendCommand(command = PACommand.FLUSH_PLAYBACK_STREAM, tag = 81) {
+                it.writeU32(0)
+            }
             assertReplyTag(h.readCommandFrame(), 81)
 
             h.sendCommand(command = PACommand.TRIGGER_PLAYBACK_STREAM, tag = 82)
