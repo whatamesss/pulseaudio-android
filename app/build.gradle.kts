@@ -20,6 +20,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Sideloaded builds only: sign with the local Android debug key so
+            // release APKs can be installed over debug builds.
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -63,6 +66,8 @@ android {
             "MonochromeLauncherIcon",
             "SetTextI18n",
             "HardcodedText",
+            // This is a sideloaded server app; the battery exemption is the point.
+            "BatteryLife",
             // compileSdk/targetSdk stay on 34: AGP 8.3 does not support 35 and
             // targetSdk 35 would force edge-to-edge on Android 15.
             "OldTargetApi"

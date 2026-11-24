@@ -53,37 +53,6 @@ class PulseClientHandlerTest {
     }
 
     @Test
-    fun wrongCookieIsRejected() {
-        withHarness { h ->
-            h.sendCommand(
-                command = PACommand.AUTH,
-                tag = 1,
-                body = {
-                    it.writeU32(16)
-                    it.writeArbitrary(ByteArray(PAConst.COOKIE_LENGTH) { 1 })
-                }
-            )
-
-            val reply = TagStructReader(h.readCommandFrame().payload)
-            assertEquals(PACommand.ERROR.toLong(), reply.readU32())
-            assertEquals(1L, reply.readU32())
-            assertEquals(PAError.ACCESS.toLong(), reply.readU32())
-        }
-    }
-
-    @Test
-    fun commandsBeforeAuthAreRejected() {
-        withHarness { h ->
-            h.sendCommand(command = PACommand.GET_SERVER_INFO, tag = 2)
-
-            val reply = TagStructReader(h.readCommandFrame().payload)
-            assertEquals(PACommand.ERROR.toLong(), reply.readU32())
-            assertEquals(2L, reply.readU32())
-            assertEquals(PAError.ACCESS.toLong(), reply.readU32())
-        }
-    }
-
-    @Test
     fun unsupportedCommandReturnsCommandError() {
         withHarness { h ->
             h.authV16()

@@ -1,13 +1,18 @@
 package us.foxtek.pulseserver.ui
 
 import android.content.ComponentName
+import android.content.Context
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Button
 import android.widget.TextView
+import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -77,12 +82,30 @@ class MainActivityTest {
     }
 
     @Test
-    fun buildConnectionHintContainsIpPortAndCookie() {
-        val hint = buildConnectionHint("10.1.2.3", 4713, "deadbeef")
+    fun buildConnectionHintContainsIpAndPort() {
+        val hint = buildConnectionHint("10.1.2.3", 4713)
         assertTrue(hint.contains("tcp:10.1.2.3:4713"))
         assertTrue(hint.contains("module-tunnel-source"))
-        assertTrue(hint.contains("deadbeef"))
-        assertTrue(hint.contains(".config/pulse/cookie"))
+    }
+
+    @Test
+    fun batteryExemptionRequestedOnLaunch() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+
+        val intent = shadowOf(activity).nextStartedActivity
+        assertEquals(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, intent.action)
+        assertEquals("package:${activity.packageName}", intent.data.toString())
+    }
+
+    @Test
+    fun batteryExemptionNotRequestedWhenAlreadyExempt() {
+        val app = ApplicationProvider.getApplicationContext<Context>()
+        val powerManager = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+        shadowOf(powerManager).setIgnoringBatteryOptimizations(app.packageName, true)
+
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+
+        assertNull(shadowOf(activity).nextStartedActivity)
     }
 
     @Test

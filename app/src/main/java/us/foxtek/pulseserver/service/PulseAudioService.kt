@@ -12,7 +12,6 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import us.foxtek.pulseserver.R
 import us.foxtek.pulseserver.proto.PAConst
-import us.foxtek.pulseserver.proto.PulseAuthCookie
 import us.foxtek.pulseserver.proto.PulseClientHandler
 import us.foxtek.pulseserver.ui.MainActivity
 import kotlinx.coroutines.*
@@ -52,7 +51,6 @@ class PulseAudioService : LifecycleService() {
     private var serverJob: Job? = null
     private val micLock = Mutex()
     private var activePort: Int = DEFAULT_PORT
-    private var authCookie = ByteArray(PAConst.COOKIE_LENGTH)
     private val clientSockets = Collections.synchronizedSet(mutableSetOf<Socket>())
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -89,7 +87,6 @@ class PulseAudioService : LifecycleService() {
     fun startServer(port: Int = DEFAULT_PORT) {
         if (serverJob?.isActive == true) return
         activePort = port
-        authCookie = PulseAuthCookie.get(this)
         state = ServerState.Starting
 
         startForeground(NOTIF_ID, buildNotification("Starting…"))
@@ -118,9 +115,7 @@ class PulseAudioService : LifecycleService() {
                     // a new connection never cancels an existing record/playback stream.
                     launch {
                         try {
-                            val handler = PulseClientHandler(
-                                client, ::onStatus, this, micLock, authCookie
-                            )
+                            val handler = PulseClientHandler(client, ::onStatus, this, micLock)
                             withContext(Dispatchers.IO) { handler.run() }
                         } finally {
                             clientSockets.remove(client)

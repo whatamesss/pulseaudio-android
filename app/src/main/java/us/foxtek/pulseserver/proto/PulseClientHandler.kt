@@ -28,8 +28,7 @@ class PulseClientHandler(
     private val socket: Socket,
     private val onStatus: (String) -> Unit,
     private val scope: CoroutineScope,
-    private val micLock: kotlinx.coroutines.sync.Mutex,
-    private val authCookie: ByteArray = ByteArray(PAConst.COOKIE_LENGTH)
+    private val micLock: kotlinx.coroutines.sync.Mutex
 ) {
     private val input  = BufferedInputStream(socket.getInputStream())
     private val output = BufferedOutputStream(socket.getOutputStream())
@@ -37,7 +36,6 @@ class PulseClientHandler(
 
     // Negotiated protocol version (filled in during AUTH)
     private var clientVersion = 0
-    private var authorized = false
 
     // Stream state
     private var playbackChannelId: Int? = null   // channel for incoming PCM from PA client
@@ -90,12 +88,6 @@ class PulseClientHandler(
         val tag     = r.readU32()
 
         Log.d(TAG, "CMD $command tag=$tag")
-
-        if (!authorized && command != PACommand.AUTH && command != PACommand.EXIT) {
-            Log.w(TAG, "Rejected command $command before AUTH")
-            sendError(tag, PAError.ACCESS)
-            return
-        }
 
         when (command) {
             PACommand.AUTH                  -> handleAuth(r, tag)
@@ -168,15 +160,7 @@ class PulseClientHandler(
     private fun handleAuth(r: TagStructReader, tag: Long) {
         val versionWord = r.readU32()
         val remoteVersion = (versionWord and 0xFFFFL).toInt()
-        val cookie = r.readArbitrary()
-
-        if (!PulseAuthCookie.matches(authCookie, cookie)) {
-            Log.w(TAG, "AUTH rejected: cookie mismatch")
-            sendError(tag, PAError.ACCESS)
-            runCatching { socket.close() }
-            return
-        }
-        authorized = true
+        val _cookie       = r.readArbitrary()  // accept any cookie (open access)
 
         // Negotiate: use the lower of client and server version.
         // The client will cap itself to our advertised version for subsequent messages.

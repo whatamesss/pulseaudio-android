@@ -9,7 +9,6 @@ PulseServer implements the PulseAudio native binary wire protocol (tagstruct fra
 - **Playback** — received PCM audio is written to `AudioTrack` (Android speaker)
 - **Capture** — microphone audio from `AudioRecord` is streamed back to the client
 - **Volume/mute** — PA volume and mute commands update the Android stream in real time
-- **Authentication** — clients must present the server's shared PulseAudio cookie
 - **Multiple clients** — each TCP connection runs in its own coroutine; only one client can hold the microphone at a time
 
 ## Setup
@@ -23,19 +22,6 @@ PulseServer implements the PulseAudio native binary wire protocol (tagstruct fra
 5. Note the IP address shown on screen
 
 ### Linux
-
-The server only accepts clients that present its auth cookie. Tap **Copy Auth
-Cookie** in the app, then install the copied hex value on the Linux machine:
-
-```bash
-mkdir -p ~/.config/pulse
-cp ~/.config/pulse/cookie ~/.config/pulse/cookie.bak 2>/dev/null || true
-printf '%s' '<hex-from-app>' | xxd -r -p > ~/.config/pulse/cookie
-chmod 600 ~/.config/pulse/cookie
-```
-
-This replaces the cookie used by your local PulseAudio daemon, so restart it
-afterwards (see below). Local clients will then use the same cookie.
 
 Add to `/etc/pulse/default.pa`, replacing `<ip>` and `<port>` with the values shown in the app:
 
@@ -90,7 +76,6 @@ app/src/main/java/us/foxtek/pulseserver/
 │   ├── TagStructReader.kt     # PA tagstruct deserialisation
 │   ├── TagStructWriter.kt     # PA tagstruct serialisation
 │   ├── PulseClientHandler.kt  # Per-connection protocol state machine
-│   ├── PulseAuthCookie.kt     # Persistent auth cookie + constant-time compare
 │   └── ServerState.kt         # Shared volume/mute state (atomic)
 ├── audio/
 │   ├── AudioPlayer.kt         # AudioTrack wrapper (PCM playback)

@@ -13,7 +13,6 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import us.foxtek.pulseserver.databinding.ActivityMainBinding
 import us.foxtek.pulseserver.proto.PAConst
-import us.foxtek.pulseserver.proto.PulseAuthCookie
 import us.foxtek.pulseserver.service.PulseAudioService
 import us.foxtek.pulseserver.service.ServerState
 
@@ -60,7 +59,11 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnToggle.setOnClickListener { toggleServer() }
         binding.btnCopyIp.setOnClickListener { copyConnectionInfo() }
-        binding.btnCopyCookie.setOnClickListener { copyCookie() }
+
+        // Keep the server alive with the screen off; ask once on first launch.
+        if (!isIgnoringBatteryOptimizations(this)) {
+            requestIgnoreBatteryOptimizations(this)
+        }
 
         // Bind to service if already running
         bindService(
@@ -146,10 +149,7 @@ class MainActivity : AppCompatActivity() {
                     binding.btnToggle.text = "Stop Server"
                     binding.tvStatus.text = "Listening — waiting for client"
                     binding.tvAddress.text = "${state.ip}:${state.port}"
-                    binding.tvHint.text = buildConnectionHint(
-                        state.ip, state.port,
-                        PulseAuthCookie.toHex(PulseAuthCookie.get(this))
-                    )
+                    binding.tvHint.text = buildConnectionHint(state.ip, state.port)
                     binding.btnCopyIp.isEnabled = true
                 }
                 is ServerState.ClientConnected -> {
@@ -176,12 +176,6 @@ class MainActivity : AppCompatActivity() {
         }
         copyToClipboard(this, "PA address", text)
         binding.tvHint.text = "Copied: $text\n\n${binding.tvHint.text}"
-    }
-
-    private fun copyCookie() {
-        val hex = PulseAuthCookie.toHex(PulseAuthCookie.get(this))
-        copyToClipboard(this, "PA auth cookie", hex)
-        binding.tvHint.text = "Auth cookie copied.\n\n${binding.tvHint.text}"
     }
 
     override fun onRequestPermissionsResult(

@@ -18,6 +18,9 @@
     <!-- Wake lock to keep CPU running during audio streaming -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Keep the long-running server alive while the screen is off -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
