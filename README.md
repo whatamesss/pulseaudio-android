@@ -8,7 +8,7 @@ PulseServer implements the PulseAudio native binary wire protocol (tagstruct fra
 
 - **Playback** — received PCM audio is written to `AudioTrack` (Android speaker)
 - **Volume/mute** — PA volume and mute commands update the Android stream in real time
-- **Multiple clients** — each TCP connection runs in its own coroutine, so a new connection never interrupts an existing playback stream
+- **Single client** — only one PulseAudio connection is accepted at a time; extra connections are refused so two devices cannot fight over playback
 - **Playback only** — record/source commands are rejected; no microphone permission is needed
 
 ## Setup

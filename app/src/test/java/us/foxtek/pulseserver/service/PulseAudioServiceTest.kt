@@ -1,13 +1,16 @@
 package us.foxtek.pulseserver.service
 
 import android.content.Intent
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import java.net.ServerSocket
+import java.net.Socket
 
 @RunWith(RobolectricTestRunner::class)
 class PulseAudioServiceTest {
@@ -67,6 +70,35 @@ class PulseAudioServiceTest {
     }
 
     @Test
+    fun onlyOneClientIsAcceptedAtATime() {
+        val service = Robolectric.buildService(PulseAudioService::class.java).create().get()
+        service.startServer(0)
+        try {
+            val port = awaitServerSocket(service).localPort
+
+            Socket("127.0.0.1", port).use { first ->
+                awaitState<ServerState.ClientConnected>(service)
+
+                Socket("127.0.0.1", port).use { second ->
+                    second.soTimeout = 2_000
+                    // The server refuses the second connection by closing it.
+                    assertEquals(-1, second.getInputStream().read())
+                }
+                assertTrue(service.state is ServerState.ClientConnected)
+                assertTrue(!first.isClosed)
+            }
+
+            awaitState<ServerState.Running>(service)
+            awaitNoActiveClient(service)
+            Socket("127.0.0.1", port).use {
+                awaitState<ServerState.ClientConnected>(service)
+            }
+        } finally {
+            service.stopServer()
+        }
+    }
+
+    @Test
     fun onBindReturnsLocalBinderAndHelperIpIsAvailable() {
         val service = Robolectric.buildService(PulseAudioService::class.java).create().get()
         val binder = service.onBind(Intent(service, PulseAudioService::class.java))
@@ -89,9 +121,49 @@ class PulseAudioServiceTest {
         m.invoke(service, msg)
     }
 
+    private fun awaitServerSocket(service: PulseAudioService): ServerSocket {
+        val deadline = System.currentTimeMillis() + 3_000
+        while (System.currentTimeMillis() < deadline) {
+            val ss = getPrivateField(service, "serverSocket") as ServerSocket?
+            if (ss != null) return ss
+            Thread.sleep(20)
+        }
+        fail("Server socket did not open")
+        error("unreachable")
+    }
+
+    private inline fun <reified T : ServerState> awaitState(
+        service: PulseAudioService,
+        timeoutMs: Long = 3_000
+    ) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (service.state is T) return
+            Thread.sleep(20)
+        }
+        fail("State never became ${T::class.simpleName}: ${service.state}")
+    }
+
+    private fun awaitNoActiveClient(service: PulseAudioService, timeoutMs: Long = 3_000) {
+        val ref = getPrivateField(service, "activeClient")
+            as java.util.concurrent.atomic.AtomicReference<*>
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (ref.get() == null) return
+            Thread.sleep(20)
+        }
+        fail("Active client was not released")
+    }
+
     private fun setPrivateField(target: Any, name: String, value: Any?) {
         val f = target.javaClass.getDeclaredField(name)
         f.isAccessible = true
         f.set(target, value)
+    }
+
+    private fun getPrivateField(target: Any, name: String): Any? {
+        val f = target.javaClass.getDeclaredField(name)
+        f.isAccessible = true
+        return f.get(target)
     }
 }

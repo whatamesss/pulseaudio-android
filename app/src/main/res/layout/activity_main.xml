@@ -224,7 +224,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:text="If MPD is configured above, Start/Stop sends enableoutput/disableoutput for that output. The name must match MPD's config:\n\naudio_output {\n    type       &quot;pulse&quot;\n    name       &quot;Android&quot;\n    server     &quot;android.home.arpa:4713&quot;\n    always_on  &quot;no&quot;\n    mixer_type &quot;none&quot;\n}\n\nWithout MPD, you can still send audio here with module-tunnel-sink or paplay."
+        android:text="If MPD is configured above, Start/Stop sends enable/disable for that output. The name must match MPD's config:\n\naudio_output {\n    type       &quot;pulse&quot;\n    name       &quot;Android&quot;\n    server     &quot;android.home.arpa:4713&quot;\n    always_on  &quot;no&quot;\n    mixer_type &quot;none&quot;\n}\n\nWithout MPD, you can still send audio here with module-tunnel-sink or paplay."
         android:textSize="11sp"
         android:textColor="@color/text_secondary"
         android:fontFamily="monospace"

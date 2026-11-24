@@ -18,7 +18,7 @@ import us.foxtek.pulseserver.ui.MainActivity
 import kotlinx.coroutines.*
 import java.net.ServerSocket
 import java.net.Socket
-import java.util.Collections
+import java.util.concurrent.atomic.AtomicReference
 
 private const val TAG             = "PulseAudioService"
 private const val NOTIF_CHANNEL   = "pulse_server"
@@ -50,7 +50,9 @@ class PulseAudioService : LifecycleService() {
     private var serverSocket: ServerSocket? = null
     private var serverJob: Job? = null
     private var activePort: Int = DEFAULT_PORT
-    private val clientSockets = Collections.synchronizedSet(mutableSetOf<Socket>())
+    // The native protocol multiplexes all streams for a client over one socket.
+    // Allow a single client at a time so two devices cannot fight over playback.
+    private val activeClient = AtomicReference<Socket?>(null)
     private val mpdOutput by lazy { MpdOutputController(this, lifecycleScope) }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -106,21 +108,31 @@ class PulseAudioService : LifecycleService() {
                         ss.accept()
                     } catch (e: Exception) {
                         if (isActive) Log.w(TAG, "Accept error", e)
-                        break
+                        return@launch
                     }
-                    client.tcpNoDelay = true
-                    clientSockets.add(client)
-                    Log.i(TAG, "Client connected: ${client.inetAddress.hostAddress}")
+                    if (!isActive) {
+                        runCatching { client.close() }
+                        return@launch
+                    }
+                    if (!activeClient.compareAndSet(null, client)) {
+                        val host = client.inetAddress.hostAddress
+                        Log.w(TAG, "Rejected extra client: $host (one client allowed)")
+                        onStatus("Rejected extra client: $host (one client allowed)")
+                        runCatching { client.close() }
+                    } else {
+                        client.tcpNoDelay = true
+                        Log.i(TAG, "Client connected: ${client.inetAddress.hostAddress}")
 
-                    // Each connection gets its own independent child scope so
-                    // a new connection never cancels an existing playback stream.
-                    launch {
-                        try {
-                            val handler = PulseClientHandler(client, ::onStatus, this)
-                            withContext(Dispatchers.IO) { handler.run() }
-                        } finally {
-                            clientSockets.remove(client)
-                            runCatching { client.close() }
+                        // Run the handler in a child scope so stopping the
+                        // server cancels it and closes the socket.
+                        launch {
+                            try {
+                                val handler = PulseClientHandler(client, ::onStatus, this)
+                                withContext(Dispatchers.IO) { handler.run() }
+                            } finally {
+                                activeClient.compareAndSet(client, null)
+                                runCatching { client.close() }
+                            }
                         }
                     }
                 }
@@ -140,10 +152,7 @@ class PulseAudioService : LifecycleService() {
         serverJob = null
         runCatching { serverSocket?.close() }
         serverSocket = null
-        synchronized(clientSockets) {
-            clientSockets.forEach { runCatching { it.close() } }
-            clientSockets.clear()
-        }
+        activeClient.getAndSet(null)?.let { runCatching { it.close() } }
         state = ServerState.Idle
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
