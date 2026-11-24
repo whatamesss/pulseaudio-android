@@ -12,6 +12,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import us.foxtek.pulseserver.databinding.ActivityMainBinding
+import us.foxtek.pulseserver.mpd.MpdPreferences
 import us.foxtek.pulseserver.proto.PAConst
 import us.foxtek.pulseserver.service.PulseAudioService
 import us.foxtek.pulseserver.service.ServerState
@@ -47,6 +48,13 @@ class MainActivity : AppCompatActivity() {
         val savedPort = PortPreferences.load(this)
         binding.etPort.setText(savedPort.toString())
 
+        val mpd = MpdPreferences.load(this)
+        binding.etMpdHost.setText(
+            if (mpd.port == MpdPreferences.DEFAULT_PORT) mpd.host
+            else "${mpd.host}:${mpd.port}"
+        )
+        binding.etMpdOutput.setText(mpd.outputName)
+
         // Save port when user confirms via keyboard "Done" action
         binding.etPort.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_DONE) {
@@ -73,6 +81,11 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    override fun onPause() {
+        saveMpdSettings()
+        super.onPause()
+    }
+
     override fun onDestroy() {
         if (bound) {
             service?.stateListener = null
@@ -96,6 +109,16 @@ class MainActivity : AppCompatActivity() {
         return if (parsed != null && parsed in 1..65535) parsed else PAConst.DEFAULT_PORT
     }
 
+    private fun saveMpdSettings() {
+        MpdPreferences.save(
+            this,
+            MpdPreferences.configFrom(
+                binding.etMpdHost.text?.toString().orEmpty(),
+                binding.etMpdOutput.text?.toString().orEmpty(),
+            )
+        )
+    }
+
     // ─── Server control ───────────────────────────────────────────────────────
 
     private fun toggleServer() {
@@ -111,6 +134,7 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
                 savePort()
+                saveMpdSettings()
                 val port = resolvePort()
                 val intent = Intent(this, PulseAudioService::class.java)
                     .setAction(PulseAudioService.ACTION_START)
@@ -130,6 +154,8 @@ class MainActivity : AppCompatActivity() {
                 state is ServerState.ClientConnected
             // Disable port field while server is active
             binding.etPort.isEnabled = !isRunning
+            binding.etMpdHost.isEnabled = !isRunning
+            binding.etMpdOutput.isEnabled = !isRunning
 
             when (state) {
                 is ServerState.Idle -> {

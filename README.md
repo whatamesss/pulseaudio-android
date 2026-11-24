@@ -42,6 +42,25 @@ Or connect for a single command without modifying the config:
 PULSE_SERVER=tcp:<ip>:<port> paplay /path/to/file.wav
 ```
 
+### MPD
+
+If MPD feeds this server through a named output, set **MPD server** (`host` or
+`host:port`, default port 6600) and **MPD output** in the app. The output is
+enabled when the server starts and disabled when it stops, so MPD does not keep
+writing into a tunnel that is gone.
+
+The output name must match MPD's config:
+
+```
+audio_output {
+    type       "pulse"
+    name       "Android"
+    server     "android.home.arpa:4713"
+    always_on  "no"
+    mixer_type "none"
+}
+```
+
 ## Requirements
 
 - Android 8.0 (API 26) or later

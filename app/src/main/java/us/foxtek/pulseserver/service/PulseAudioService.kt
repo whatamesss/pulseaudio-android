@@ -11,6 +11,7 @@ import android.util.Log
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import us.foxtek.pulseserver.R
+import us.foxtek.pulseserver.mpd.MpdOutputController
 import us.foxtek.pulseserver.proto.PAConst
 import us.foxtek.pulseserver.proto.PulseClientHandler
 import us.foxtek.pulseserver.ui.MainActivity
@@ -52,6 +53,7 @@ class PulseAudioService : LifecycleService() {
     private val micLock = Mutex()
     private var activePort: Int = DEFAULT_PORT
     private val clientSockets = Collections.synchronizedSet(mutableSetOf<Socket>())
+    private val mpdOutput by lazy { MpdOutputController(this, lifecycleScope) }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -88,6 +90,7 @@ class PulseAudioService : LifecycleService() {
         if (serverJob?.isActive == true) return
         activePort = port
         state = ServerState.Starting
+        mpdOutput.enable()
 
         startForeground(NOTIF_ID, buildNotification("Starting…"))
 
@@ -134,6 +137,7 @@ class PulseAudioService : LifecycleService() {
     }
 
     fun stopServer() {
+        mpdOutput.disable()
         serverJob?.cancel()
         serverJob = null
         runCatching { serverSocket?.close() }
