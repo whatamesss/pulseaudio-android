@@ -20,6 +20,12 @@ import java.nio.ByteOrder
 
 private const val TAG = "AudioPlayer"
 
+internal fun pcmBytesPerFrame(paFormat: Int, channels: Int): Int = when (paFormat) {
+    PASampleFormat.FLOAT32LE, PASampleFormat.FLOAT32BE -> 4 * channels
+    PASampleFormat.S32LE, PASampleFormat.S32BE -> 4 * channels
+    else -> 2 * channels
+}
+
 @Suppress("TooManyFunctions")
 class AudioPlayer(
     private val sampleRate: Int,
@@ -49,12 +55,6 @@ class AudioPlayer(
 
     @Volatile
     private var muted = false
-
-    private val bytesPerFrame: Int get() = when (paFormat) {
-        PASampleFormat.FLOAT32LE, PASampleFormat.FLOAT32BE -> 4 * channels
-        PASampleFormat.S32LE, PASampleFormat.S32BE -> 4 * channels
-        else -> 2 * channels
-    }
 
     fun start() {
         val channelMask = if (channels == 1)
@@ -100,9 +100,9 @@ class AudioPlayer(
         stopWorker()
         if (track == null) start()
 
-        val capacity = (
-            sampleRate.toLong() * bytesPerFrame * bufferMillis / 1000
-        ).coerceAtMost(Int.MAX_VALUE.toLong()).toInt().coerceAtLeast(bytesPerFrame)
+        val capacity = AudioBuffer.bytesForMillis(
+            bufferMillis, sampleRate, pcmBytesPerFrame(paFormat, channels)
+        )
 
         pcmQueue = PcmAudioQueue(capacity)
 

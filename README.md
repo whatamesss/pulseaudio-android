@@ -7,9 +7,10 @@
 >
 > What this fork changes:
 >
-> - **Buffered audio playback (main improvement)** — a bounded ~300 ms PCM
->   queue decouples socket reads from `AudioTrack` writes, so slow audio writes
->   no longer stall the network receive path.
+> - **Buffered audio playback (main improvement)** — a bounded PCM queue
+>   (adjustable from 0–3000 ms, 1000 ms by default) decouples socket reads from
+>   `AudioTrack` writes, so slow audio writes no longer stall the network
+>   receive path.
 > - **Playback only** — microphone capture and the `RECORD_AUDIO` permission
 >   are gone; record/source protocol commands are rejected.
 > - **One client at a time** — extra PulseAudio connections are refused so two
@@ -42,13 +43,18 @@ The main fork improvement is the playback path. Incoming PCM used to be written
 to `AudioTrack` directly from the socket read loop, so a slow or blocking write
 could stall network reads and cause the PulseAudio client to back up.
 
-Now the socket loop only enqueues PCM into a bounded queue (about 300 ms at the
-stream's sample rate). A dedicated writer coroutine drains it into
-`AudioTrack`, so network reception stays responsive even when the speaker path
-is busy or paused. If the queue fills, the oldest audio is dropped rather than
-delaying playback. Pause/cork, flush, and drain are handled explicitly, and
-shutdown waits for the writer without releasing `AudioTrack` underneath a
-native write.
+Now the socket loop only enqueues PCM into a bounded queue. A dedicated writer
+coroutine drains it into `AudioTrack`, so network reception stays responsive
+even when the speaker path is busy or paused.
+
+The **Audio buffer** slider sets the queue size from 0 ms to 3000 ms (default
+1000 ms). The selected value is also advertised to the PulseAudio client as the
+stream `tlength`, so the client does not send a larger burst than the queue can
+hold. Raise it if playback hiccups; lower it to reduce latency. The setting is
+applied to new playback streams, so stop and restart the server after changing
+it. If the queue still fills, the oldest audio is dropped rather than delaying
+playback. Pause/cork, flush, and drain are handled explicitly, and shutdown
+waits for the writer without releasing `AudioTrack` underneath a native write.
 
 ## Setup
 
@@ -189,11 +195,13 @@ app/src/main/java/us/foxtek/pulseserver/
 │   ├── PulseClientHandler.kt  # Per-connection protocol state machine
 │   ├── ServerState.kt         # Shared volume/mute state (atomic)
 ├── audio/
+│   ├── AudioBuffer.kt         # Buffer duration/byte conversions and limits
 │   ├── AudioPlayer.kt         # AudioTrack wrapper (PCM playback)
 │   └── PcmAudioQueue.kt       # Bounded buffer between network and AudioTrack
 ├── service/
 │   └── PulseAudioService.kt   # Foreground service, ServerSocket lifecycle
 ├── ui/
+│   ├── BufferPreferences.kt   # SharedPreferences helper for buffer size
 │   ├── MainActivity.kt        # Single-screen UI
 │   ├── PortPreferences.kt     # SharedPreferences helper for port setting
 │   └── UiHelpers.kt           # Permissions and battery-exemption helpers

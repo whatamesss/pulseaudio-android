@@ -8,6 +8,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Button
+import android.widget.SeekBar
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
@@ -95,6 +96,37 @@ class MainActivityTest {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
 
         assertNull(shadowOf(activity).nextStartedActivity)
+    }
+
+    @Test
+    fun bufferSliderLoadsAndSavesPreference() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        BufferPreferences.save(context, 1_500)
+
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val seekBar = activity.view<SeekBar>(R.id.sbBuffer)
+        assertEquals(1_500, seekBar.progress)
+        assertEquals("1500 ms", activity.view<TextView>(R.id.tvBufferValue).text.toString())
+
+        seekBar.progress = 2_500
+        idleMain()
+
+        assertEquals(2_500, BufferPreferences.load(context))
+        assertEquals("2500 ms", activity.view<TextView>(R.id.tvBufferValue).text.toString())
+    }
+
+    @Test
+    fun bufferSliderIsDisabledWhileServerIsActive() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val seekBar = activity.view<SeekBar>(R.id.sbBuffer)
+
+        invokeOnStateChanged(activity, ServerState.Running(port = 4713, ip = "10.0.0.2"))
+        idleMain()
+        assertFalse(seekBar.isEnabled)
+
+        invokeOnStateChanged(activity, ServerState.Idle)
+        idleMain()
+        assertTrue(seekBar.isEnabled)
     }
 
     @Test

@@ -14,6 +14,7 @@ import us.foxtek.pulseserver.R
 import us.foxtek.pulseserver.mpd.MpdOutputController
 import us.foxtek.pulseserver.proto.PAConst
 import us.foxtek.pulseserver.proto.PulseClientHandler
+import us.foxtek.pulseserver.ui.BufferPreferences
 import us.foxtek.pulseserver.ui.MainActivity
 import kotlinx.coroutines.*
 import java.net.ServerSocket
@@ -127,7 +128,12 @@ class PulseAudioService : LifecycleService() {
                         // server cancels it and closes the socket.
                         launch {
                             try {
-                                val handler = PulseClientHandler(client, ::onStatus, this)
+                                val handler = PulseClientHandler(
+                                    client,
+                                    ::onStatus,
+                                    this,
+                                    BufferPreferences.load(this@PulseAudioService)
+                                )
                                 withContext(Dispatchers.IO) { handler.run() }
                             } finally {
                                 activeClient.compareAndSet(client, null)

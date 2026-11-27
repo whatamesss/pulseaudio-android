@@ -205,6 +205,62 @@
 
     </LinearLayout>
 
+    <!-- Playback buffer -->
+    <LinearLayout
+        android:id="@+id/layoutBuffer"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="16dp"
+        app:layout_constraintTop_toBottomOf="@id/layoutMpdOutput"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Audio buffer"
+                android:textSize="15sp"
+                android:textColor="@color/text_primary" />
+
+            <TextView
+                android:id="@+id/tvBufferValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="1000 ms"
+                android:textSize="15sp"
+                android:textColor="@color/accent"
+                android:fontFamily="monospace" />
+
+        </LinearLayout>
+
+        <SeekBar
+            android:id="@+id/sbBuffer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="3000"
+            android:progress="1000"
+            android:contentDescription="Audio buffer"
+            android:progressTint="@color/accent"
+            android:thumbTint="@color/accent" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="Higher values trade latency for smoother playback (0–3000 ms)."
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary" />
+
+    </LinearLayout>
+
     <!-- Toggle button -->
     <Button
         android:id="@+id/btnToggle"
@@ -214,7 +270,7 @@
         android:text="Start Server"
         android:textSize="16sp"
         style="@style/Widget.Material3.Button"
-        app:layout_constraintTop_toBottomOf="@id/layoutMpdOutput"
+        app:layout_constraintTop_toBottomOf="@id/layoutBuffer"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 

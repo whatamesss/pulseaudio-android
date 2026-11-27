@@ -8,9 +8,11 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.IBinder
 import android.view.inputmethod.EditorInfo
+import android.widget.SeekBar
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import us.foxtek.pulseserver.audio.AudioBuffer
 import us.foxtek.pulseserver.databinding.ActivityMainBinding
 import us.foxtek.pulseserver.mpd.MpdPreferences
 import us.foxtek.pulseserver.proto.PAConst
@@ -54,6 +56,22 @@ class MainActivity : AppCompatActivity() {
             else "${mpd.host}:${mpd.port}"
         )
         binding.etMpdOutput.setText(mpd.outputName)
+
+        val bufferMillis = BufferPreferences.load(this)
+        binding.sbBuffer.max = AudioBuffer.MAX_MILLIS
+        binding.sbBuffer.progress = bufferMillis
+        updateBufferLabel(bufferMillis)
+        binding.sbBuffer.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val millis = AudioBuffer.clampMillis(progress)
+                BufferPreferences.save(this@MainActivity, millis)
+                updateBufferLabel(millis)
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
 
         // Save port when user confirms via keyboard "Done" action
         binding.etPort.setOnEditorActionListener { _, actionId, _ ->
@@ -108,6 +126,10 @@ class MainActivity : AppCompatActivity() {
         return if (parsed != null && parsed in 1..65535) parsed else PAConst.DEFAULT_PORT
     }
 
+    private fun updateBufferLabel(millis: Int) {
+        binding.tvBufferValue.text = "$millis ms"
+    }
+
     private fun saveMpdSettings() {
         MpdPreferences.save(
             this,
@@ -155,6 +177,7 @@ class MainActivity : AppCompatActivity() {
             binding.etPort.isEnabled = !isRunning
             binding.etMpdHost.isEnabled = !isRunning
             binding.etMpdOutput.isEnabled = !isRunning
+            binding.sbBuffer.isEnabled = !isRunning
 
             when (state) {
                 is ServerState.Idle -> {

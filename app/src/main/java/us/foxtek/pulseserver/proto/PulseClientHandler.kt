@@ -1,7 +1,9 @@
 package us.foxtek.pulseserver.proto
 
 import android.util.Log
+import us.foxtek.pulseserver.audio.AudioBuffer
 import us.foxtek.pulseserver.audio.AudioPlayer
+import us.foxtek.pulseserver.audio.pcmBytesPerFrame
 import kotlinx.coroutines.*
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -26,7 +28,8 @@ private const val TAG = "PulseClientHandler"
 class PulseClientHandler(
     private val socket: Socket,
     private val onStatus: (String) -> Unit,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val bufferMillis: Int = AudioBuffer.DEFAULT_MILLIS
 ) {
     private val input  = BufferedInputStream(socket.getInputStream())
     private val output = BufferedOutputStream(socket.getOutputStream())
@@ -198,7 +201,7 @@ class PulseClientHandler(
         val sinkName   = r.readString()
         val maxlength  = r.readU32()
         val corked     = r.readBoolean()
-        val tlength    = r.readU32()
+        r.readU32()     // client tlength; we advertise our own buffer instead
         val prebuf     = r.readU32()
         val minreq     = r.readU32()
         val syncid     = r.readU32()    // sync group ID (v1+)
@@ -226,7 +229,11 @@ class PulseClientHandler(
             repeat(nFormats) { r.readFormatInfo() }
         }
 
-        Log.i(TAG, "CREATE_PLAYBACK: format=$format ch=$channels rate=$rate corked=$corked")
+        Log.i(
+            TAG,
+            "CREATE_PLAYBACK: format=$format ch=$channels rate=$rate " +
+                "corked=$corked buffer=${bufferMillis}ms"
+        )
 
         val actualRate   = if (rate > 0 && rate <= 192000) rate.toInt() else PAConst.SAMPLE_RATE
         val actualFormat = format
@@ -239,6 +246,27 @@ class PulseClientHandler(
         // A client may create a second stream without deleting the first.
         if (audioPlayer != null) stopPlaybackStream()
 
+        // The client's requested tlength is only a hint. Advertise the
+        // configured buffer instead so the app queue and the client's write
+        // credit agree. A small queue fed by a large client burst is what
+        // makes audio hiccup and skip.
+        val bytesPerFrame = pcmBytesPerFrame(actualFormat, channels)
+        val clientPre = if (prebuf > 0 && prebuf != PAConst.INVALID_INDEX)
+            prebuf else PAConst.PREBUF_BYTES.toLong()
+        val clientMin = if (minreq > 0 && minreq != PAConst.INVALID_INDEX)
+            minreq else PAConst.MINREQ_BYTES.toLong()
+        val clientMax = if (maxlength > 0 && maxlength != PAConst.INVALID_INDEX)
+            maxlength else PAConst.MAX_BYTES.toLong()
+
+        val minreqMs = AudioBuffer.millisForBytes(clientMin, actualRate, bytesPerFrame)
+        val effectiveBufferMs = maxOf(AudioBuffer.clampMillis(bufferMillis), minreqMs)
+        val actualTl = AudioBuffer.bytesForMillis(
+            effectiveBufferMs, actualRate, bytesPerFrame
+        ).toLong()
+        val actualMax = maxOf(clientMax, actualTl)
+        val actualPre = clientPre.coerceAtMost(actualTl)
+        val actualMin = clientMin.coerceAtMost(actualTl)
+
         val chanId = 0  // playback channel
         playbackChannelId = chanId
         playbackCorked   = corked
@@ -247,14 +275,9 @@ class PulseClientHandler(
         player.setVolume(sinkGain())
         player.setMute(ServerAudioState.sinkMuted.get())
         audioPlayer = player
-        player.startBuffered(scope)
+        player.startBuffered(scope, effectiveBufferMs)
         if (corked) player.pause()
 
-        // Echo back client's buffer attrs if valid, otherwise use our defaults
-        val actualTl    = if (tlength   > 0 && tlength   != PAConst.INVALID_INDEX) tlength   else PAConst.TL_BYTES.toLong()
-        val actualPre   = if (prebuf    > 0 && prebuf    != PAConst.INVALID_INDEX) prebuf    else PAConst.PREBUF_BYTES.toLong()
-        val actualMin   = if (minreq    > 0 && minreq    != PAConst.INVALID_INDEX) minreq    else PAConst.MINREQ_BYTES.toLong()
-        val actualMax   = if (maxlength > 0 && maxlength != PAConst.INVALID_INDEX) maxlength else PAConst.MAX_BYTES.toLong()
         val initialCredit = actualTl
         playbackCredit  = initialCredit
         playbackTlength = actualTl

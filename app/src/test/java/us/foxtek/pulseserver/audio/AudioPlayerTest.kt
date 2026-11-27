@@ -35,9 +35,9 @@ class AudioPlayerTest {
 
     @Test
     fun bytesPerFrameMatchesFormats() {
-        assertEquals(8, invokeBytesPerFrame(AudioPlayer(44_100, 2, PASampleFormat.FLOAT32LE)))
-        assertEquals(8, invokeBytesPerFrame(AudioPlayer(44_100, 2, PASampleFormat.S32BE)))
-        assertEquals(4, invokeBytesPerFrame(AudioPlayer(44_100, 2, PASampleFormat.S16LE)))
+        assertEquals(8, pcmBytesPerFrame(PASampleFormat.FLOAT32LE, 2))
+        assertEquals(8, pcmBytesPerFrame(PASampleFormat.S32BE, 2))
+        assertEquals(4, pcmBytesPerFrame(PASampleFormat.S16LE, 2))
     }
 
     @Test
@@ -183,12 +183,6 @@ class AudioPlayerTest {
         m.isAccessible = true
         @Suppress("UNCHECKED_CAST")
         return m.invoke(player, pcm) as ByteArray
-    }
-
-    private fun invokeBytesPerFrame(player: AudioPlayer): Int {
-        val m = AudioPlayer::class.java.getDeclaredMethod("getBytesPerFrame")
-        m.isAccessible = true
-        return m.invoke(player) as Int
     }
 
     private fun setPrivateTrack(player: AudioPlayer, track: AudioTrack?) {

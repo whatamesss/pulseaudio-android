@@ -32,6 +32,17 @@ class PcmAudioQueueTest {
     }
 
     @Test
+    fun oversizedFrameIsKeptWhenItCannotFit() {
+        val queue = PcmAudioQueue(2)
+
+        queue.offer(byteArrayOf(1))
+        assertTrue(queue.offer(byteArrayOf(2, 3, 4)))
+
+        assertEquals(1, queue.droppedFrames.get())
+        assertArrayEquals(byteArrayOf(2, 3, 4), queue.take())
+    }
+
+    @Test
     fun clearRemovesAllFrames() {
         val queue = PcmAudioQueue(4)
 

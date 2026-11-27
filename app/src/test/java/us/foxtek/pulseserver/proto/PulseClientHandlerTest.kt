@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import org.junit.Assert.assertEquals
+import us.foxtek.pulseserver.audio.AudioBuffer
+import us.foxtek.pulseserver.audio.pcmBytesPerFrame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -258,12 +260,21 @@ class PulseClientHandlerTest {
                 body = { writePlaybackCreateBodyV16(it, corked = true) }
             )
 
+            val expectedTl = AudioBuffer.bytesForMillis(
+                AudioBuffer.DEFAULT_MILLIS,
+                44_100,
+                pcmBytesPerFrame(PASampleFormat.S16LE, 2)
+            ).toLong()
             val createReply = TagStructReader(h.readCommandFrame().payload)
             assertEquals(PACommand.REPLY.toLong(), createReply.readU32())
             assertEquals(40L, createReply.readU32())
             assertEquals(0L, createReply.readU32())
             assertEquals(0L, createReply.readU32())
-            assertEquals(16_384L, createReply.readU32())
+            assertEquals(expectedTl, createReply.readU32())
+            assertEquals(PAConst.MAX_BYTES.toLong(), createReply.readU32())
+            assertEquals(expectedTl, createReply.readU32())
+            assertEquals(8_192L, createReply.readU32())
+            assertEquals(4_096L, createReply.readU32())
 
             h.sendCommand(
                 command = PACommand.DELETE_PLAYBACK_STREAM,
@@ -273,6 +284,34 @@ class PulseClientHandlerTest {
             val deleteReply = TagStructReader(h.readCommandFrame().payload)
             assertEquals(PACommand.REPLY.toLong(), deleteReply.readU32())
             assertEquals(41L, deleteReply.readU32())
+        }
+    }
+
+    @Test
+    fun createPlaybackUsesConfiguredBufferForCredit() {
+        withHarness(bufferMillis = 500) { h ->
+            h.authV16()
+            h.sendCommand(
+                command = PACommand.CREATE_PLAYBACK_STREAM,
+                tag = 42,
+                body = { writePlaybackCreateBodyV16(it, corked = false) }
+            )
+
+            val expectedTl = AudioBuffer.bytesForMillis(
+                500,
+                44_100,
+                pcmBytesPerFrame(PASampleFormat.S16LE, 2)
+            ).toLong()
+            val reply = TagStructReader(h.readCommandFrame().payload)
+            assertEquals(PACommand.REPLY.toLong(), reply.readU32())
+            assertEquals(42L, reply.readU32())
+            assertEquals(0L, reply.readU32())
+            assertEquals(0L, reply.readU32())
+            assertEquals(expectedTl, reply.readU32())        // requested_bytes
+            assertEquals(PAConst.MAX_BYTES.toLong(), reply.readU32())
+            assertEquals(expectedTl, reply.readU32())        // tlength
+            assertEquals(8_192L, reply.readU32())            // prebuf
+            assertEquals(4_096L, reply.readU32())            // minreq
         }
     }
 
@@ -472,8 +511,11 @@ class PulseClientHandlerTest {
         assertEquals(tag, r.readU32())
     }
 
-    private fun withHarness(block: (Harness) -> Unit) {
-        val harness = Harness()
+    private fun withHarness(
+        bufferMillis: Int = AudioBuffer.DEFAULT_MILLIS,
+        block: (Harness) -> Unit
+    ) {
+        val harness = Harness(bufferMillis)
         try {
             block(harness)
         } finally {
@@ -486,7 +528,7 @@ class PulseClientHandlerTest {
         ServerAudioState.sinkMuted.set(false)
     }
 
-    private class Harness {
+    private class Harness(bufferMillis: Int = AudioBuffer.DEFAULT_MILLIS) {
         private val serverSocket = ServerSocket(0)
         private val clientSocket = Socket("127.0.0.1", serverSocket.localPort).apply { soTimeout = 2000 }
         private val serverClient = serverSocket.accept()
@@ -495,7 +537,8 @@ class PulseClientHandlerTest {
         private val handler = PulseClientHandler(
             serverClient,
             { msg -> synchronized(statuses) { statuses.add(msg) } },
-            scope
+            scope,
+            bufferMillis
         )
         private val runner = thread(start = true, name = "PulseClientHandlerTest") { handler.run() }
         private val input = BufferedInputStream(clientSocket.getInputStream())

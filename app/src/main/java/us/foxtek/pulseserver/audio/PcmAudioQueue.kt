@@ -6,7 +6,9 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Bounded PCM queue with oldest-audio eviction.
  *
- * Capacity is measured in bytes rather than packet count.
+ * Capacity is measured in bytes rather than packet count. A packet larger
+ * than the whole capacity is still accepted on its own so very small buffer
+ * settings play audio instead of silently dropping every write.
  */
 class PcmAudioQueue(
     private val maxBytes: Int
@@ -24,8 +26,14 @@ class PcmAudioQueue(
 
     fun offer(pcm: ByteArray): Boolean = synchronized(lock) {
         if (pcm.size > maxBytes) {
-            droppedFrames.incrementAndGet()
-            return@synchronized false
+            // The packet cannot fit within the configured capacity. Keep it
+            // anyway (evicting anything older) so a tiny buffer still plays.
+            droppedFrames.addAndGet(queue.size.toLong())
+            queue.clear()
+            queue.addLast(pcm)
+            queuedBytes = pcm.size
+            lock.notifyAll()
+            return@synchronized true
         }
 
         while (queuedBytes + pcm.size > maxBytes) {
