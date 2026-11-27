@@ -18,8 +18,8 @@ val keystoreProperties = Properties().apply {
 }
 
 // Bump both values together, then tag the release (see README → Releases).
-val appVersionCode = 3
-val appVersionName = "1.0.1"
+val appVersionCode = 4
+val appVersionName = "1.0.2"
 
 android {
     namespace = "us.foxtek.pulseserver"

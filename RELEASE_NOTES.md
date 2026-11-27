@@ -1,24 +1,20 @@
-# PulseServer for Android 1.0.1
+# PulseServer for Android 1.0.2
 
-First published release of the playback-focused fork.
+Adds user control over playback buffering.
 
 ## Highlights
 
-- **Buffered audio playback (main improvement)** — incoming PCM now goes
-  through a bounded ~300 ms queue, with a dedicated writer coroutine feeding
-  `AudioTrack`. Slow speaker writes no longer stall the network receive path;
-  the oldest audio is dropped if the queue fills, and pause, flush, drain, and
-  shutdown are handled explicitly.
-- **Playback only** — microphone capture and the `RECORD_AUDIO` permission are
-  removed. Record/source protocol commands are rejected.
-- **One client at a time** — extra PulseAudio connections are refused so two
-  devices cannot fight over playback.
-- **MPD output control** — starting/stopping the server enables/disables the
-  configured MPD output.
-- **Release-only builds** — signed release APKs are built from the release
-  variant; debug builds are disabled.
+- **Adjustable audio buffer** — a new slider sets the playback queue from
+  0 ms to 3000 ms (1000 ms by default). Raise it if playback hiccups; lower it
+  to reduce latency. The choice is persisted across launches.
+- **Buffer size advertised to the client** — the selected size is sent to the
+  PulseAudio client as the stream `tlength`, so client bursts no longer
+  overrun the app's queue. Oversized packets are still played when the buffer
+  is set very small.
+- The buffer setting applies to new playback streams; stop and restart the
+  server after changing it.
 
 ## Install
 
-Download `pulseserver-1.0.1-release.apk` and sideload it. The app requires
+Download `pulseserver-1.0.2-release.apk` and sideload it. The app requires
 Android 8.0 (API 26) or later.
