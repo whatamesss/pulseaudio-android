@@ -27,6 +27,14 @@
 
 An Android app that runs a PulseAudio native protocol server on your phone or tablet. Linux machines can connect over the local network and use the Android device as a remote speaker — no root, no native libraries, no PulseAudio installed on Android.
 
+## Screenshots
+
+The main screen, shown in two parts:
+
+| Status, address, and connection settings | Audio buffer, controls, and MPD help |
+| --- | --- |
+| <img src="docs/screenshots/main-screen-top.png" width="330" alt="Top of the app: status card showing a connected client and the server address, followed by port, MPD server, MPD output, and audio buffer settings"> | <img src="docs/screenshots/main-screen-bottom.png" width="330" alt="Bottom of the app: audio buffer slider, Stop Server button, and an MPD audio_output configuration example"> |
+
 ## How it works
 
 PulseServer implements the PulseAudio native binary wire protocol (tagstruct framing, protocol version 16) entirely in Kotlin. It opens a TCP socket and accepts connections from a Linux PulseAudio daemon using the standard `module-tunnel-sink` module.
