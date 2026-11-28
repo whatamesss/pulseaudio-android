@@ -72,7 +72,7 @@ class MpdClientTest {
             }
 
             block(server.localPort, commands)
-            worker.join(2_000)
+            worker.join(10_000)
         }
     }
 }

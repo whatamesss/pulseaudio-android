@@ -3,6 +3,7 @@ package us.foxtek.pulseserver.ui
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -12,6 +13,16 @@ import us.foxtek.pulseserver.audio.AudioBuffer
 class BufferPreferencesTest {
 
     private val context: Context get() = ApplicationProvider.getApplicationContext()
+
+    @Before
+    fun clearPreferences() {
+        // Tests in this class assume a clean preference store, regardless of
+        // what other Robolectric tests may have written.
+        context.getSharedPreferences("pulse_server_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .commit()
+    }
 
     @Test
     fun defaultsToAudioBufferDefault() {

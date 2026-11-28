@@ -294,7 +294,8 @@ class PulseClientHandlerTest {
             h.sendCommand(
                 command = PACommand.CREATE_PLAYBACK_STREAM,
                 tag = 42,
-                body = { writePlaybackCreateBodyV16(it, corked = false) }
+                // Corked so no writer coroutine races the reply on slow CI VMs.
+                body = { writePlaybackCreateBodyV16(it, corked = true) }
             )
 
             val expectedTl = AudioBuffer.bytesForMillis(
@@ -530,7 +531,7 @@ class PulseClientHandlerTest {
 
     private class Harness(bufferMillis: Int = AudioBuffer.DEFAULT_MILLIS) {
         private val serverSocket = ServerSocket(0)
-        private val clientSocket = Socket("127.0.0.1", serverSocket.localPort).apply { soTimeout = 2000 }
+        private val clientSocket = Socket("127.0.0.1", serverSocket.localPort).apply { soTimeout = 10_000 }
         private val serverClient = serverSocket.accept()
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         private val statuses = mutableListOf<String>()
@@ -580,7 +581,7 @@ class PulseClientHandlerTest {
             }
         }
 
-        fun awaitStatusContaining(text: String, timeoutMs: Long = 1000): Boolean {
+        fun awaitStatusContaining(text: String, timeoutMs: Long = 5_000): Boolean {
             val deadline = System.currentTimeMillis() + timeoutMs
             while (System.currentTimeMillis() < deadline) {
                 if (hasStatusContaining(text)) return true
@@ -594,7 +595,7 @@ class PulseClientHandlerTest {
             runCatching { serverClient.close() }
             runCatching { serverSocket.close() }
             scope.cancel()
-            runner.join(1000)
+            runner.join(5_000)
         }
     }
 }

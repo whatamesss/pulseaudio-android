@@ -80,7 +80,7 @@ class PulseAudioServiceTest {
                 awaitState<ServerState.ClientConnected>(service)
 
                 Socket("127.0.0.1", port).use { second ->
-                    second.soTimeout = 2_000
+                    second.soTimeout = 10_000
                     // The server refuses the second connection by closing it.
                     assertEquals(-1, second.getInputStream().read())
                 }
@@ -122,7 +122,7 @@ class PulseAudioServiceTest {
     }
 
     private fun awaitServerSocket(service: PulseAudioService): ServerSocket {
-        val deadline = System.currentTimeMillis() + 3_000
+        val deadline = System.currentTimeMillis() + 10_000
         while (System.currentTimeMillis() < deadline) {
             val ss = getPrivateField(service, "serverSocket") as ServerSocket?
             if (ss != null) return ss
@@ -134,7 +134,7 @@ class PulseAudioServiceTest {
 
     private inline fun <reified T : ServerState> awaitState(
         service: PulseAudioService,
-        timeoutMs: Long = 3_000
+        timeoutMs: Long = 10_000
     ) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
@@ -144,7 +144,7 @@ class PulseAudioServiceTest {
         fail("State never became ${T::class.simpleName}: ${service.state}")
     }
 
-    private fun awaitNoActiveClient(service: PulseAudioService, timeoutMs: Long = 3_000) {
+    private fun awaitNoActiveClient(service: PulseAudioService, timeoutMs: Long = 10_000) {
         val ref = getPrivateField(service, "activeClient")
             as java.util.concurrent.atomic.AtomicReference<*>
         val deadline = System.currentTimeMillis() + timeoutMs

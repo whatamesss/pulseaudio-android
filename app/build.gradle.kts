@@ -80,6 +80,12 @@ android {
         unitTests {
             isReturnDefaultValues = true
             isIncludeAndroidResources = true
+            // Robolectric loads a full Android runtime per test class. The
+            // Gradle default (512 MB) is tight once Kover instruments the
+            // classes, and a slow CI runner is where that shows up first.
+            all { test ->
+                test.maxHeapSize = "2g"
+            }
         }
     }
 
